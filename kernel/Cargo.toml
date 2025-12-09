@@ -1,0 +1,18 @@
+[package]
+name = "invariant-kernel"
+version = "34.1.0"
+edition = "2021"
+description = "Invariant SDK - Rust Acceleration Core"
+
+[lib]
+name = "invariant_kernel"
+crate-type = ["cdylib"]
+
+[features]
+default = ["python"]
+python = ["pyo3/extension-module"]
+
+[dependencies]
+pyo3 = { version = "0.20", optional = true }
+rayon = "1.8"
+hnsw_rs = "0.2"
