@@ -5,7 +5,7 @@ Acts as a bridge between the clean API and the underlying logic components.
 
 import sys
 from pathlib import Path
-from typing import List, Optional, Tuple, Union
+from typing import List, Optional, Tuple
 
 # ============================================================================
 # IMPORTS
@@ -64,15 +64,17 @@ class InvariantEngine:
         self.vector_store = VectorStore(self.data_dir / "vectors.pkl")
         self.embedder = get_embedder()
         
-    def ingest(self, source: str, data: Union[str, List[str]], cuts: List[int] = None) -> int:
+    def ingest(self, source: str, text: str, cuts: List[int] = None) -> int:
         """
         Validated ingestion with Conservation Law enforcement.
         
-        Two modes:
-        1. List of strings (recommended): ingest(source, ["Sent 1.", "Sent 2."])
-           - No cuts needed, segments are used directly
-        2. Raw text + cuts: ingest(source, "raw text", cuts=[10, 20])
-           - Validates that cuts perfectly reconstruct the text
+        Args:
+            source: Document identifier
+            text: Raw text (original, unmodified)
+            cuts: Optional list of split positions (from LLM segmenter)
+        
+        If cuts provided: validates that cuts perfectly reconstruct text.
+        If no cuts: auto-splits by paragraphs.
         
         Returns:
             Number of blocks created.
@@ -80,25 +82,20 @@ class InvariantEngine:
         Raises:
             ValueError: If Conservation Law is violated.
         """
-        # MODE 1: List of strings (from LLM splitter)
-        if isinstance(data, list):
-            segments = [s for s in data if s]  # Filter empty
-            # Conservation is implicit: raw = "".join(segments)
+        if not isinstance(text, str):
+            raise ValueError("text must be str. Use StructuralAgent for automated ingestion.")
         
-        # MODE 2: Raw text (with optional cuts)
-        elif isinstance(data, str):
-            if cuts is not None:
-                cuts = sorted(set([0] + cuts + [len(data)]))
-                segments = [data[cuts[i]:cuts[i+1]] for i in range(len(cuts)-1)]
-                
-                # CONSERVATION LAW: Validate
-                if "".join(segments) != data:
-                    raise ValueError("Conservation Law violated: cuts don't reconstruct text")
-            else:
-                # Fallback: paragraph splitting
-                segments = [s.strip() for s in data.split('\n\n') if s.strip()]
+        if cuts is not None:
+            # Validate and apply cuts
+            cuts = sorted(set([0] + [c for c in cuts if 0 < c < len(text)] + [len(text)]))
+            segments = [text[cuts[i]:cuts[i+1]] for i in range(len(cuts)-1)]
+            
+            # CONSERVATION LAW: Validate
+            if "".join(segments) != text:
+                raise ValueError("Conservation Law violated: cuts don't reconstruct text")
         else:
-            raise ValueError("data must be str or List[str]")
+            # Fallback: paragraph splitting
+            segments = [s.strip() for s in text.split('\n\n') if s.strip()]
         
         # Store each segment
         count = 0

@@ -13,49 +13,38 @@ Prerequisites: Python 3.9+, Rust ([rustup.rs](https://rustup.rs))
 ## Quick Start
 
 ```python
-from invariant_sdk import InvariantEngine, SearchMode
+from invariant_sdk import InvariantEngine
 
 engine = InvariantEngine("./data")
 
-# Ingest (Conservation Law validated)
-engine.ingest("doc1", ["Module X depends on Library Y", "Library Y has vulnerability"])
+# Ingest with LLM-provided cuts (Conservation Law validated)
+text = "Module X depends on Library Y. Library Y has vulnerability."
+engine.ingest("doc1", text, cuts=[32])  # LLM returns positions only
 
-# Link (Rust-accelerated)
-engine.crystallize()
+# Or use StructuralAgent for full automation
+from invariant_sdk.tools import StructuralAgent
+
+agent = StructuralAgent(engine, llm=my_llm)
+agent.digest("doc2", raw_text)  # 2 LLM calls: segment + classify
 
 # Infer (Transitivity)
 engine.evolve()  # Derives: X → vulnerable
 
 # Search
-results = engine.resonate("affected modules", mode=SearchMode.BINOCULAR)
+results = engine.resonate("affected modules")
 ```
 
-## Automated Ingestion (with LLM)
+## L0 Principles
 
-```python
-from invariant_sdk.tools import StructuralAgent
-
-def my_llm(prompt: str) -> str:
-    return openai.chat(...).content
-
-agent = StructuralAgent(engine, llm=my_llm)
-agent.digest("doc1", raw_text)  # 2 LLM calls: segment + classify
-```
-
-## For AI Agents
-
-```python
-from invariant_sdk import get_prompt
-
-system_prompt = get_prompt()  # Full operator prompt
-api_only = get_prompt("api")  # Just API reference
-```
+1. **Conservation Law**: Every character from source appears in exactly one block
+2. **Membrane Law**: Invalid data is rejected, never stored
+3. **LLM as Discriminator**: LLM returns positions/labels, not text
 
 ## API
 
 | Method | Description |
 |--------|-------------|
-| `ingest(source, data, cuts)` | Validated ingestion |
+| `ingest(source, text, cuts)` | Validated ingestion (cuts from LLM) |
 | `observe(source, text)` | Quick ingestion (auto-split) |
 | `resonate(query, mode)` | Search with interference |
 | `crystallize(threshold)` | Auto-link similar blocks |
@@ -63,18 +52,25 @@ api_only = get_prompt("api")  # Just API reference
 | `forget(source)` | Delete document |
 | `get_prompt()` | Operator prompt for AI agents |
 
+## For AI Agents
+
+```python
+from invariant_sdk import get_prompt
+
+system_prompt = get_prompt()  # Full operator prompt
+```
+
 ## Structure
 
 ```
 invariant-sdk/
-├── kernel/          # Rust (crystallize_all, crystallize_hnsw)
-├── python/          # Python SDK
+├── kernel/          # Rust (crystallize_hnsw)
+├── python/
 │   └── invariant_sdk/
-│       ├── engine.py       # Core engine
-│       ├── tools/          # StructuralAgent
-│       └── operator_prompt.md
-├── Makefile
-└── install.sh
+│       ├── engine.py           # Core engine
+│       ├── tools/agent.py      # StructuralAgent
+│       └── operator_prompt.md  # AI agent instructions
+└── Makefile
 ```
 
 ## License
