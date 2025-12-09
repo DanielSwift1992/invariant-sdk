@@ -5,9 +5,8 @@ This module provides the stable public interface for the SDK.
 All implementation is in engine.py.
 """
 
-# Re-export the main engine and types
 from .engine import InvariantEngine
-from .types import Block, SearchMode, RefinerStrategy
+from .types import Block, SearchMode, Relation
 from .core.reactor import Tank, Reactor, Truth, Edge, Provenance
 
 __all__ = [
@@ -19,5 +18,6 @@ __all__ = [
     "Provenance",
     "Block",
     "SearchMode",
-    "RefinerStrategy",
+    "Relation",
 ]
+

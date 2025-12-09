@@ -9,24 +9,25 @@ from enum import Enum
 
 class Relation(Enum):
     """
-    Edge Types (Port Classification Traits).
+    Edge Types.
     
-    Only 5 fundamental edge types exist. Everything else reduces to these:
-    
-    - "X DEFINES Y" → use EQUALS (definition is identity)
-    - "X IS_A Y" → use IMP (type hierarchy is implication)
-    - "X HAS Y" → use IMP (property is implication)
-    - "X RELATED Y" → use OMEGA (pending classification)
+    5 fundamental types:
+    - IMP: A implies/causes B
+    - NOT: A contradicts B
+    - EQUALS: A is identical to B
+    - GATE: A conditions B
+    - OMEGA: Pending classification (for LLM to upgrade)
     """
-    IMP = "IMP"        # Implication: A → B
-    NOT = "NOT"        # Contradiction: A ⊥ B  
-    EQUALS = "EQUALS"  # Identity: A ≡ B
-    GATE = "GATE"      # Custom port (user-defined transformation)
-    OMEGA = "OMEGA"    # Unknown / pending classification
-    
+    IMP = "IMP"
+    NOT = "NOT"
+    EQUALS = "EQUALS"
+    GATE = "GATE"
+    OMEGA = "OMEGA"
+
 
 @dataclass
 class Block:
+    """A semantic unit of content."""
     id: str
     content: str
     source: str
@@ -35,12 +36,9 @@ class Block:
 
 
 class SearchMode(Enum):
-    VECTOR = "vector"
-    MERKLE = "merkle"
-    BINOCULAR = "binocular"
+    """Search strategies."""
+    VECTOR = "vector"      # Semantic similarity
+    MERKLE = "merkle"      # Structural matching
+    BINOCULAR = "binocular"  # Both combined (default)
 
-
-class RefinerStrategy(Enum):
-    KEYWORD = "keyword"
-    LLM = "llm"
 

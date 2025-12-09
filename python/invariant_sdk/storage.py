@@ -121,6 +121,16 @@ class BlockStore:
     def get_ids_by_source(self, source: str) -> List[str]:
         cur = self.conn.execute("SELECT id FROM blocks WHERE source = ?", (source,))
         return [row[0] for row in cur.fetchall()]
+    
+    def get_by_source(self, source: str) -> List[dict]:
+        """Get all blocks for a source, ordered by position."""
+        cur = self.conn.execute(
+            "SELECT * FROM blocks WHERE source = ? ORDER BY position", (source,)
+        )
+        return [{
+            "id": row[0], "text": row[1], "content": row[2],
+            "source": row[3], "position": row[4], "timestamp": row[5]
+        } for row in cur.fetchall()]
 
 # ============================================================================
 # VECTOR STORE

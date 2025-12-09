@@ -5,7 +5,7 @@ Acts as a bridge between the clean API and the underlying logic components.
 
 import sys
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 # ============================================================================
 # IMPORTS
@@ -13,7 +13,7 @@ from typing import List, Optional, Tuple
 
 from .core.reactor import Tank, Reactor, Truth, get_token_hash_hex
 from .storage import BlockStore, VectorStore, get_embedder, cosine_similarity
-from .types import Block, SearchMode, RefinerStrategy, Relation
+from .types import Block, SearchMode, Relation
 import logging
 
 # Configure logger
@@ -64,43 +64,81 @@ class InvariantEngine:
         self.vector_store = VectorStore(self.data_dir / "vectors.pkl")
         self.embedder = get_embedder()
         
-    def observe(self, source: str, content: str) -> int:
+    def ingest(self, source: str, data: Union[str, List[str]], cuts: List[int] = None) -> int:
         """
-        Input Matter. 
-        Splits text, hashes it, stores vectors, builds IMP chain.
-        """
-        # 1. Split (reuse logic or simple split)
-        # Simplified block splitter for SDK clarity
-        raw_blocks = [b.strip() for b in content.split('\n\n') if b.strip()]
+        Validated ingestion with Conservation Law enforcement.
         
+        Two modes:
+        1. List of strings (recommended): ingest(source, ["Sent 1.", "Sent 2."])
+           - No cuts needed, segments are used directly
+        2. Raw text + cuts: ingest(source, "raw text", cuts=[10, 20])
+           - Validates that cuts perfectly reconstruct the text
+        
+        Returns:
+            Number of blocks created.
+        
+        Raises:
+            ValueError: If Conservation Law is violated.
+        """
+        # MODE 1: List of strings (from LLM splitter)
+        if isinstance(data, list):
+            segments = [s for s in data if s]  # Filter empty
+            # Conservation is implicit: raw = "".join(segments)
+        
+        # MODE 2: Raw text (with optional cuts)
+        elif isinstance(data, str):
+            if cuts is not None:
+                cuts = sorted(set([0] + cuts + [len(data)]))
+                segments = [data[cuts[i]:cuts[i+1]] for i in range(len(cuts)-1)]
+                
+                # CONSERVATION LAW: Validate
+                if "".join(segments) != data:
+                    raise ValueError("Conservation Law violated: cuts don't reconstruct text")
+            else:
+                # Fallback: paragraph splitting
+                segments = [s.strip() for s in data.split('\n\n') if s.strip()]
+        else:
+            raise ValueError("data must be str or List[str]")
+        
+        # Store each segment
         count = 0
         prev_id = None
         
-        for i, text in enumerate(raw_blocks):
-            # Create ID
+        for i, segment in enumerate(segments):
+            if not segment.strip():
+                continue
+                
             block_id = f"{source}:B{i}"
             
             # Store Physical (SQL)
-            self.block_store.save(block_id, text, text, source, i)
+            self.block_store.save(block_id, segment, segment, source, i)
             
             # Store Wave (Vector)
-            vec = self.embedder.encode(text)
+            vec = self.embedder.encode(segment)
             self.vector_store.add(block_id, vec)
             
             # Store Topology (Tank)
-            # EQUALS: Block identity (content → hash)
             if hasattr(self.tank, 'absorb'):
-                self.tank.absorb(block_id, text[:50], Relation.EQUALS.value, 1.0, Truth.SIGMA, f"obs:{source}")
-            
-                # IMP: Time (Sequence)
+                # EQUALS: Block identity
+                self.tank.absorb(block_id, segment[:50], Relation.EQUALS.value, 1.0, Truth.SIGMA, f"obs:{source}")
+                
+                # IMP: Temporal sequence
                 if prev_id:
                     self.tank.absorb(prev_id, block_id, Relation.IMP.value, 1.0, Truth.SIGMA, f"seq:{source}")
             
             prev_id = block_id
             count += 1
-            
+        
         self._persist()
         return count
+    
+    def observe(self, source: str, content: str) -> int:
+        """
+        Simple ingestion (paragraph-based splitting).
+        
+        For LLM-guided segmentation, use ingest() with cut positions.
+        """
+        return self.ingest(source, content, cuts=None)
 
     def resonate(self, signal: str, mode: SearchMode = SearchMode.BINOCULAR, top_k: int = 5) -> List[Block]:
         """
@@ -149,27 +187,38 @@ class InvariantEngine:
         results.sort(key=lambda x: x.score, reverse=True)
         return results[:top_k]
 
-    def crystallize(self, strategy: RefinerStrategy = RefinerStrategy.KEYWORD, 
-                    method: str = "threshold", param: float = 0.75, top_k: int = 50) -> int:
+    def crystallize(self, method: str = "threshold", threshold: float = 0.75, top_k: int = 50) -> int:
         """
-        Phase Transition (Auto-linking).
-        Methods:
-        - "threshold": Fixed radius (param = 0.75). O(N^2). Precise.
-        - "mdl": Adaptive density (param = sensitivity). O(N^2). Context-aware.
-        - "hnsw": Small World Index (param = threshold). O(N log N). Scalable (1M+).
+        Find and link similar blocks (creates OMEGA edges for LLM classification).
         
-        Uses Rust Core.
+        Args:
+            method: "threshold" (precise, O(N²)) or "hnsw" (fast, O(N log N))
+            threshold: Similarity threshold (0.0-1.0). Higher = fewer but stronger links.
+            top_k: For HNSW, number of neighbors to consider.
+        
+        Returns:
+            Number of new candidate edges created.
+        
+        Note:
+            Created edges have relation=OMEGA (pending classification).
+            Use LLM to upgrade OMEGA→IMP/NOT/EQUALS.
         """
+        # Input validation
+        if threshold < 0.0 or threshold > 1.0:
+            raise ValueError(f"threshold must be 0.0-1.0, got {threshold}")
+        if method not in ("threshold", "hnsw"):
+            raise ValueError(f"method must be 'threshold' or 'hnsw', got '{method}'")
+        
         blocks = self.block_store.get_all()
-        if not blocks: return 0
+        if not blocks:
+            return 0
         
         new_edges = 0
         
-        # Try Rust Acceleration
         try:
             import invariant_kernel
             
-            # Prepare vectors (aligned with blocks list)
+            # Prepare vectors
             vectors = []
             valid_indices = []
             
@@ -179,38 +228,30 @@ class InvariantEngine:
                     vectors.append(v)
                     valid_indices.append(i)
             
-            if not vectors: return 0
+            if not vectors:
+                return 0
 
-            # Run Rust (Method Selection)
-            # print(f"[CRYSTALLIZE] Running Rust Core ({method})...")
-            
+            # Run Rust crystallization
             if method == "hnsw":
-                # HNSW: O(N log N) - for large datasets
-                matches = invariant_kernel.crystallize_hnsw(vectors, param, top_k)
+                matches = invariant_kernel.crystallize_hnsw(vectors, threshold, top_k)
             else:
-                # Threshold (brute-force): O(N²) - for small datasets
-                matches = invariant_kernel.crystallize_all(vectors, param)
+                matches = invariant_kernel.crystallize_all(vectors, threshold)
             
             for i_local, j_local, sim in matches:
-                # Map back to original blocks
                 idx1 = valid_indices[i_local]
                 idx2 = valid_indices[j_local]
                 b1 = blocks[idx1]
                 b2 = blocks[idx2]
                 
-                # OMEGA: Pending classification (crystallize creates candidates)
-                # Agent layer determines final edge type
-                rel = Relation.OMEGA.value
-                
+                # OMEGA: Pending LLM classification
                 if hasattr(self.tank, 'absorb'):
-                    self.tank.absorb(b1['id'], b2['id'], rel, sim, Truth.ETA, "crystal:rust")
+                    self.tank.absorb(b1['id'], b2['id'], Relation.OMEGA.value, sim, Truth.ETA, "crystal:rust")
                 new_edges += 1
                 
         except ImportError:
-            # Enforce Rust Core
             raise ImportError(
                 "Invariant Kernel (Rust) not found. "
-                "Please compile the kernel: 'maturin develop --release'"
+                "Install: cd kernel && maturin develop --release"
             )
         
         self._persist()

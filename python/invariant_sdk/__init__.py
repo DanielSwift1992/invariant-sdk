@@ -17,9 +17,9 @@ Usage:
 """
 
 from .engine import InvariantEngine
-from .types import SearchMode, RefinerStrategy, Block, Relation
+from .types import SearchMode, Block, Relation
 from .prompt import get_prompt
 
 __version__ = "34.1.0"
-__all__ = ["InvariantEngine", "SearchMode", "RefinerStrategy", "Block", "Relation", "get_prompt"]
+__all__ = ["InvariantEngine", "SearchMode", "Block", "Relation", "get_prompt"]
 
