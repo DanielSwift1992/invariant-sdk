@@ -74,10 +74,67 @@ Example: ["IMP", "NOT", "IMP"]
 
 Return ONLY the JSON array:"""
 
+    SEARCH_PROMPT = """Decompose a complex query into atomic sub-queries.
+
+QUERY: {query}
+
+Rules:
+- Split distinct concepts (e.g. "AI risks and Blockchain benefits" -> ["AI risks", "Blockchain benefits"])
+- Keep it simple: 1-3 sub-queries usually
+- If query is already atomic, return list with 1 item
+
+Return JSON list of strings.
+Example: ["concept A", "concept B"]
+
+Return ONLY the JSON array:"""
+
     def __init__(self, engine, llm: Callable[[str], str]):
         self.engine = engine
         self.llm = llm
     
+    def search(self, query: str, limit: int = 10) -> List[dict]:
+        """
+        Smart search with query decomposition.
+        
+        1. Decomposes query into atomic sub-queries via LLM
+        2. Executes engine.resonate() for each sub-query
+        3. Aggregates results (blocks matching multiple sub-queries rank higher)
+        """
+        # 1. Decompose
+        sub_queries = self._decompose_query(query)
+        if not sub_queries:
+            return []
+            
+        # 2. Search each (Batch)
+        # We fetch more than limit to allow for intersection filtering
+        candidates = {}  # id -> {block, count, score_sum}
+        
+        for sub_q in sub_queries:
+            results = self.engine.resonate(sub_q, top_k=limit * 2)
+            for block in results:
+                bid = block.id
+                if bid not in candidates:
+                    candidates[bid] = {"block": block, "count": 0, "score": 0.0}
+                
+                candidates[bid]["count"] += 1
+                # We assume score is correlated with rank in resonate, 
+                # but SDK might not return score directly in Block object yet.
+                # We use simple frequency boosting.
+        
+        # 3. Aggregate (Intersection Logic)
+        # Sort by: 
+        # 1. Count (Intersection cardinality) - higher is better
+        # 2. Tie-break: implicit vector score (order of appearance in resonate)
+        
+        ranked = sorted(
+            candidates.values(),
+            key=lambda x: x["count"],
+            reverse=True
+        )
+        
+        # Return mostly just the blocks
+        return [item["block"] for item in ranked[:limit]]
+
     def digest(self, source: str, text: str) -> int:
         """
         Process document: segment → store → classify → link.
@@ -114,6 +171,18 @@ Return ONLY the JSON array:"""
         self.engine._persist()
         
         return count
+    
+    def _decompose_query(self, query: str) -> List[str]:
+        """Decompose query into sub-queries."""
+        prompt = self.SEARCH_PROMPT.format(query=query)
+        try:
+            response = self.llm(prompt)
+            qs = json.loads(self._clean_json(response))
+            if isinstance(qs, list) and all(isinstance(s, str) for s in qs):
+                return qs
+            return [query] # Fallback
+        except:
+            return [query] # Fallback
     
     def _segment(self, text: str) -> List[int]:
         """Get cut positions from LLM. Raises IngestionError if invalid."""

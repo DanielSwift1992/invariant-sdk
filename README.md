@@ -27,6 +27,10 @@ from invariant_sdk.tools import StructuralAgent
 agent = StructuralAgent(engine, llm=my_llm)
 agent.digest("doc2", raw_text)  # 2 LLM calls: segment + classify
 
+# Smart Search (with Query Decomposition)
+results = agent.search("impact of vulnerabilities on X")
+# Decomposes -> ["impact of vulnerabilities", "X"] -> Intersection
+
 # Infer (Transitivity)
 engine.evolve()  # Derives: X → vulnerable
 

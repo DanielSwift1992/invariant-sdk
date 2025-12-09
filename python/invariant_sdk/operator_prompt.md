@@ -73,25 +73,24 @@ Delete all data from a source.
 
 ---
 
-## StructuralAgent (for automated ingestion)
-
-If processing documents automatically:
+## StructuralAgent (for automated workflows)
 
 ```python
 from invariant_sdk.tools import StructuralAgent
 
-def my_llm(prompt: str) -> str:
-    return openai.chat(...).content
-
 agent = StructuralAgent(engine, llm=my_llm)
-agent.digest("doc1", raw_text)  # 2 LLM calls: segment + classify
+
+# 1. Ingest (Segments text + Links neighbors)
+agent.digest("doc1", raw_text)
+
+# 2. Smart Search (Decomposes complex queries)
+# "AI risks and Blockchain" -> ["AI risks", "Blockchain"] -> Intersection
+results = agent.search("complex query") 
 ```
 
-LLM returns only:
-- Cut positions: `[45, 120]` (integers)
-- Relations: `["IMP", "NOT"]` (labels)
-
-No text generation = no hallucination.
+### LLM Protocols
+- **Ingestion**: Returns only Cut Positions (ints) and Relations (labels).
+- **Search**: Returns JSON list of atomic sub-queries.
 
 ---
 
