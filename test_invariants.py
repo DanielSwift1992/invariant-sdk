@@ -208,6 +208,44 @@ def test_hub_topology():
     print(f"✓ Hub topology O(k) vs O(k²) — {hub_edges} vs {mesh_edges} — PASSED")
 
 
+def test_agent_end_to_end():
+    """Test full StructuralAgent.digest workflow (the bug that was missed!)"""
+    import tempfile
+    from invariant_sdk import InvariantEngine
+    from invariant_sdk.tools import StructuralAgent
+    
+    def mock_llm(prompt):
+        return '''
+{
+    "blocks": [
+        {
+            "start_quote": "Module X depends",
+            "end_quote": "on Library Y.",
+            "logic": "ORIGIN",
+            "concepts": [{"name": "Module_X", "type": "DEF"}]
+        }
+    ]
+}
+'''
+    
+    tmpdir = tempfile.mkdtemp()
+    
+    engine = InvariantEngine(tmpdir)
+    agent = StructuralAgent(engine, llm=mock_llm)
+    
+    text = "Module X depends on Library Y."
+    count = agent.digest("test_doc", text)
+    
+    assert count >= 1, f"digest() should return >= 1, got {count}"
+    
+    # Verify block was saved
+    assert engine.block_store.exists, "BlockStore should have exists() method"
+    blocks = engine.block_store.get_all()
+    assert len(blocks) >= 1, f"Should have saved blocks, got {len(blocks)}"
+    
+    print("✓ Agent end-to-end (InvariantEngine + StructuralAgent) — PASSED")
+
+
 def main():
     print("=" * 60)
     print("invariant-sdk Test Suite")
@@ -222,6 +260,7 @@ def main():
         test_invariant_v_separation()
         test_agent_structures()
         test_hub_topology()
+        test_agent_end_to_end()  # NEW: catches storage bugs!
         
         print()
         print("=" * 60)
@@ -234,6 +273,7 @@ def main():
         print("  III. Energy (MDL Sublimation)")
         print("  IV.  Hierarchy (Ring ordering)")
         print("  V.   Separation (Phase Law)")
+        print("  + Agent end-to-end integration")
         
     except Exception as e:
         print(f"\n❌ TEST FAILED: {e}")

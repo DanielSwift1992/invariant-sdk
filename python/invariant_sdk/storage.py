@@ -85,8 +85,28 @@ class BlockStore:
         """)
         self.conn.commit()
     
-    def save(self, block_id: str, text: str, content: str, 
-             source: str, position: int, timestamp: str = ""):
+    def exists(self, block_id: str) -> bool:
+        """Check if block exists (for deduplication)."""
+        cur = self.conn.execute("SELECT 1 FROM blocks WHERE id = ?", (block_id,))
+        return cur.fetchone() is not None
+    
+    def save(self, data):
+        """
+        Save block. Accepts either:
+        - dict with keys: id, source, content, position, text (optional), timestamp (optional)
+        - positional args: block_id, text, content, source, position, timestamp
+        """
+        if isinstance(data, dict):
+            block_id = data['id']
+            text = data.get('text', data.get('content', ''))  # fallback to content
+            content = data.get('content', '')
+            source = data.get('source', '')
+            position = data.get('position', 0)
+            timestamp = data.get('timestamp', '')
+        else:
+            # Legacy positional args (for backward compatibility)
+            raise TypeError("BlockStore.save() requires a dict argument")
+        
         self.conn.execute("""
             INSERT OR REPLACE INTO blocks 
             (id, text, content, source, position, timestamp)
