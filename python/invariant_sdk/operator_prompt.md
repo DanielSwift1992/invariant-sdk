@@ -6,63 +6,98 @@ You are an agent operating the **Invariant SDK** — a domain-agnostic knowledge
 
 The SDK provides a **topological knowledge base** (Tank) that:
 
-1. **Stores semantic units** as blocks with directed edges
+1. **Stores semantic blocks** with directed edges
 2. **Performs logical inference** (transitivity)
 3. **Searches** via semantic + structural matching
 4. **Never loses data** — deletion requires explicit command
 
 ---
 
-## Segmentation Guidelines
+## Streaming Protocol (Quotes-Based)
 
-### Minimal Semantic Unit
-- The smallest piece of text with standalone meaning
-- Can be: statement, question, command, definition
-- Split at logical boundaries, not grammatical ones
+### How It Works
+1. Text is split into chunks (~8000 chars)
+2. LLM identifies blocks using **exact quotes**
+3. Python validates quote positions
+4. Blocks stored with logical connections
 
-### Linking Words (but, therefore, because)
-- Keep them IN the block — they signal relation type
-- Block 2: "But it's dangerous" ← "But" stays inside
+### LLM Response Format
+```json
+{
+  "blocks": [
+    {
+      "start_quote": "First few words of block",
+      "end_quote": "last few words of block",
+      "logic": "ORIGIN",
+      "concepts": [
+        {"name": "concept_name", "type": "DEF"}
+      ]
+    },
+    {
+      "start_quote": "Next block starts",
+      "end_quote": "and ends here",
+      "logic": "IMP",
+      "concepts": [
+        {"name": "concept_name", "type": "REF"}
+      ]
+    }
+  ]
+}
+```
 
-### Conservation Law
-- Every character must appear in exactly one block
-- No text lost, no text duplicated
+### Field Rules
+
+| Field | Required | Values |
+|-------|----------|--------|
+| `start_quote` | Yes | Exact text from input (first 3-5 words) |
+| `end_quote` | Yes | Exact text from input (last 3-5 words) |
+| `logic` | Block 1: Optional | `ORIGIN` or omit |
+| `logic` | Block 2+: **Required** | `IMP`, `NOT`, `EQUALS`, `GATE` |
+| `concepts` | Optional | `{"name": "...", "type": "DEF"|"REF"}` |
+
+### Logic Relations
+
+| Relation | Signal Words | Meaning |
+|----------|--------------|---------|
+| `ORIGIN` | (first block) | No predecessor |
+| `IMP` | because, therefore, so | A implies B |
+| `NOT` | but, however, although | A contradicts B |
+| `EQUALS` | means, is defined as | A equivalent to B |
+| `GATE` | if, when, unless | A conditions B |
+
+### Concept Types
+
+| Type | Meaning |
+|------|---------|
+| `DEF` | Block **defines** this concept |
+| `REF` | Block **references** this concept |
 
 ---
 
 ## API Reference
 
-### `ingest(source: str, text: str, structure=None) -> int`
-Store blocks with triple validation support.
+### `agent.digest(source: str, text: str, chunk_size: int = 8000) -> int`
+Stream text into knowledge graph via LLM.
 
-**Unified Protocol: DocumentStructure**
+**Parameters:**
+- `source`: Document identifier
+- `text`: Raw text to process
+- `chunk_size`: Characters per chunk (default 8000). Reduce for smaller LLM context windows.
 
 ```python
-from invariant_sdk.tools.agent import DocumentStructure, Symbol
+from invariant_sdk import InvariantEngine
+from invariant_sdk.tools import StructuralAgent
 
-#  Way 1: Manual (you create structure)
-structure = DocumentStructure(
-    cuts=[32, 60],
-    validation_quotes=["Library Y.", "vulnerability."],
-    relations=["IMP"],
-    symbols=[]
-)
-engine.ingest("doc1", text, structure)
+engine = InvariantEngine("./data")
+agent = StructuralAgent(engine, llm=my_llm)
 
-# Way 2: Automatic (agent creates structure)
-agent.digest("doc1", text)  # LLM generates DocumentStructure
-
-# Legacy: List[int] still supported
-engine.ingest("doc1", text, [32, 60])  # Just cuts, no validation
+# LLM extracts structure automatically
+# Use smaller chunks for weaker LLMs
+count = agent.digest("doc1", raw_text, chunk_size=4000)
+print(f"Created {count} blocks")
 ```
 
-**DocumentStructure fields:**
-- `cuts`: Block end positions (required)
-- `validation_quotes`: Text verification (recommended)
-- `relations`: Sequential links (optional)
-- `symbols`: Backward links (optional)
-
-### `resonate(signal, mode, top_k) -> List[Block]`
+### `engine.resonate(signal, mode, top_k) -> List[Block]`
 Search the knowledge base.
 
 Modes: `VECTOR`, `MERKLE`, `BINOCULAR` (default)
@@ -73,82 +108,28 @@ for block in results:
     print(f"[{block.id}] {block.content}")
 ```
 
-### `evolve() -> int`
+### `engine.evolve() -> int`
 Run logical inference (transitivity).
 
-### `forget(source) -> int`
+### `engine.forget(source) -> int`
 Delete all data from a source.
 
 ---
 
-## Edge Relations
+## Conservation Law
 
-| Relation | Signal Words | Meaning |
-|----------|--------------|---------|
-| IMP | because, therefore, so | A explains B |
-| NOT | but, however, although | A contradicts B |
-| EQUALS | means, is defined as | A = B |
-| GATE | if, when, unless | A conditions B |
+**Every character must appear in exactly one block.**
+
+If quotes don't cover all text, ingestion fails:
+```
+IngestionError: Uncovered text (Conservation Law)
+```
 
 ---
 
-## StructuralAgent (for automated workflows)
+## Rules for AI Agents
 
-```python
-from invariant_sdk.tools import StructuralAgent
-
-agent = StructuralAgent(engine, llm=my_llm)
-
-# 1. Digest (Single-shot structure analysis + integration)
-# Phase 1: Analyzes structure (cuts + relations) in ONE call
-# Phase 2: Integrates with existing knowledge (batch classification)
-agent.digest("doc1", raw_text)
-
-# 2. Smart Search (Decomposes complex queries)
-# "AI risks and Blockchain" -> ["AI risks", "Blockchain"] -> Intersection
-results = agent.search("complex query") 
-```
-
-### LLM Protocols
-
-**Phase 1 (Intra-Document) - Single-Shot Analysis:**
-
-LLM receives:
-```
-ANALYZE TEXT STRUCTURE WITH TRIPLE VALIDATION
-Text: ...
-```
-
-LLM returns JSON with 4 required fields:
-```json
-{
-  "cuts": [29, 67],
-  "validation_quotes": ["overheated.", "completely."],
-  "relations": ["IMP"],
-  "symbols": [
-    {"block": 0, "defines": "concept_name"},
-    {"block": 1, "refers_to": "concept_name"}
-  ]
-}
-```
-
-**Fields:**
-- `cuts`: Exact positions where blocks END (numbers)
-- `validation_quotes`: Last 3-5 words of each block (text verification)
-- `relations`: Relation from block[i] to block[i+1] (IMP, NOT, EQUALS, GATE)
-- `symbols`: Backward links for pronouns/references (optional but recommended)
-
-**Phase 2 (Inter-Document):**
-- Batch classification for candidate pairs
-- Returns JSON array of relations
-
-**Search:**
-- Returns JSON list of atomic sub-queries
-
----
-
-## Rules
-
-1. **Cite sources:** Reference block IDs `[doc1:B3]`
-2. **No hallucination:** Only use API methods above
-3. **Conservation Law:** Never lose or duplicate text
+1. **Exact quotes only** — no paraphrases
+2. **Logic required** — every block after first needs IMP/NOT/EQUALS/GATE
+3. **Cite sources** — reference block IDs `[doc1:B3]`
+4. **Conservation** — never lose or duplicate text

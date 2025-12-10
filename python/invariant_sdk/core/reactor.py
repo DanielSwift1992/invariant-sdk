@@ -16,48 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from collections import defaultdict
 
-# Import from shared merkle module
-try:
-    from .merkle import get_token_hash_hex, bond_id
-except ImportError:
-    # Fallback if run standalone
-    import hashlib
-    
-    class Node:
-        def __init__(self, left=None, right=None):
-            self.left = left
-            self.right = right
-        @property
-        def is_origin(self):
-            return self.left is None and self.right is None
-    
-    ORIGIN = Node()
-    def Dyad(a, b): return Node(a, b)
-    
-    def encode_byte(byte_val: int) -> Node:
-        chain = ORIGIN
-        for i in range(8):
-            bit = (byte_val >> i) & 1
-            bit_node = ORIGIN if bit == 0 else Dyad(ORIGIN, ORIGIN)
-            chain = Dyad(bit_node, chain)
-        return chain
-    
-    def encode_string(s: str) -> Node:
-        chain = ORIGIN
-        for b in reversed(s.encode('utf-8')):
-            chain = Dyad(encode_byte(b), chain)
-        return chain
-    
-    def merkle_hash(node: Node) -> bytes:
-        if node.is_origin:
-            return hashlib.sha256(b'\x00').digest()
-        return hashlib.sha256(b'\x01' + merkle_hash(node.left) + merkle_hash(node.right)).digest()
-    
-    def get_token_hash_hex(s: str) -> str:
-        return merkle_hash(encode_string(s)).hex()
-    
-    def bond_id(u: str, v: str, rel: str) -> str:
-        return hashlib.sha256(f"{u}:{rel}:{v}".encode()).hexdigest()[:16]
+# Import from Rust kernel (performance-critical)
+from invariant_kernel import get_token_hash_hex, bond_id
 
 
 # ============================================================================
@@ -69,6 +29,20 @@ class Truth(Enum):
     SIGMA = 1   # Observed (Physical weights)
     LAMBDA = 2  # Derived (Logic)
     ETA = 3     # Hypothesis
+
+
+class EdgeStatus(Enum):
+    """Edge lifecycle status for MDL Sublimation.
+    
+    Sublimation: when facts are compressed into a rule,
+    facts transition from ACTIVE to SUPERSEDED.
+    
+    W_storage: all edges (append-only, never deleted)
+    W_active: only ACTIVE edges (minimized by MDL)
+    """
+    ACTIVE = 0      # Included in W_active, returned by queries
+    SUPERSEDED = 1  # Excluded from W_active, kept for provenance
+
 
 @dataclass
 class Provenance:
@@ -84,6 +58,8 @@ class Edge:
     relation: str
     energy: float = 0.0
     provenance: List[Provenance] = field(default_factory=list)
+    status: EdgeStatus = EdgeStatus.ACTIVE  # MDL Sublimation: default ACTIVE
+    superseded_by: Optional[str] = None  # ID of rule that superseded this edge
     
     @property
     def id(self) -> str:
@@ -93,6 +69,11 @@ class Edge:
     def ring(self) -> Truth:
         if not self.provenance: return Truth.ETA
         return min((p.ring for p in self.provenance), key=lambda r: r.value)
+    
+    @property
+    def is_active(self) -> bool:
+        """True if edge contributes to W_active (not superseded)."""
+        return self.status == EdgeStatus.ACTIVE
 
 
 # ============================================================================
@@ -143,18 +124,61 @@ class Tank:
     def label(self, h: str) -> str:
         return self.labels.get(h, h[:8])
 
-    def get_neighbors(self, u_h: str, max_ring: Truth = Truth.ETA) -> List[Edge]:
-        return [
-            self.edges[eid] for eid in self.adj.get(u_h, [])
-            if self.edges[eid].ring.value <= max_ring.value
-        ]
+    def get_neighbors(self, u_h: str, max_ring: Truth = Truth.ETA, 
+                      include_superseded: bool = False) -> List[Edge]:
+        """Get neighbors (W_active by default, W_storage if include_superseded=True)."""
+        edges = []
+        for eid in self.adj.get(u_h, []):
+            e = self.edges[eid]
+            if e.ring.value <= max_ring.value:
+                if include_superseded or e.is_active:
+                    edges.append(e)
+        return edges
     
-    def get_sigma_neighbors(self, u_h: str) -> List[Edge]:
+    def get_sigma_neighbors(self, u_h: str, include_superseded: bool = False) -> List[Edge]:
         """Get only σ-edges (for strict λ mode)."""
-        return [
-            self.edges[eid] for eid in self.adj.get(u_h, [])
-            if self.edges[eid].ring == Truth.SIGMA
-        ]
+        edges = []
+        for eid in self.adj.get(u_h, []):
+            e = self.edges[eid]
+            if e.ring == Truth.SIGMA:
+                if include_superseded or e.is_active:
+                    edges.append(e)
+        return edges
+    
+    def supersede(self, edge_ids: List[str], rule_id: str) -> int:
+        """
+        MDL Sublimation: mark edges as SUPERSEDED by a rule.
+        
+        This implements Invariant III (Energy/MDL Law):
+        - Facts remain in W_storage (append-only preserved)
+        - Facts removed from W_active (MDL compression)
+        - Provenance maintained via superseded_by field
+        
+        Args:
+            edge_ids: List of edge IDs to supersede
+            rule_id: ID of the rule that supersedes these edges
+            
+        Returns:
+            Number of edges superseded
+        """
+        count = 0
+        for eid in edge_ids:
+            if eid in self.edges:
+                e = self.edges[eid]
+                if e.is_active:
+                    e.status = EdgeStatus.SUPERSEDED
+                    e.superseded_by = rule_id
+                    count += 1
+        return count
+    
+    def get_active_weight(self) -> int:
+        """W_active: weight of active topology (for MDL)."""
+        active_edges = sum(1 for e in self.edges.values() if e.is_active)
+        return len(self.labels) + active_edges
+    
+    def get_storage_weight(self) -> int:
+        """W_storage: weight of full storage (append-only)."""
+        return len(self.labels) + len(self.edges)
 
     # ================================================================
     # ENTROPY SHIELD: Topological Noise Detection (Zipf's Law)
@@ -262,15 +286,15 @@ class Tank:
 # ============================================================================
 # THE REACTOR
 # ============================================================================
-# Internal relation type constants
-__REL_IMP = "IMP"
-__REL_IS_A = "IS_A"
+# Internal relation type constants (single underscore to avoid Python name mangling)
+_REL_IMP = "IMP"
+_REL_IS_A = "IS_A"
 _REL_EQUALS = "EQUALS"
-__REL_HAS_PROP = "HAS_PROP"
+_REL_HAS_PROP = "HAS_PROP"
 
 # Internal relation property constants
-__PROP_TRANSITIVE = "TRANSITIVE"
-__PROP_INHERITABLE = "INHERITABLE"
+_PROP_TRANSITIVE = "TRANSITIVE"
+_PROP_INHERITABLE = "INHERITABLE"
 _PROP_SYMMETRIC = "SYMMETRIC"
 
 # Type definition for noise filter
@@ -328,7 +352,7 @@ class Reactor:
         props: Dict[str, Set[str]] = defaultdict(set)
         
         # Bootstrap: Atom IMP is always transitive (fundamental)
-        props[__REL_IMP].add(_PROP_TRANSITIVE)
+        props[_REL_IMP].add(_PROP_TRANSITIVE)
         
         # Load user axioms from Tank (Ring ALPHA)
         for edge in self.tank.edges.values():
@@ -606,141 +630,41 @@ class Reactor:
         """
         CYCLE δ: Discover transformation rules from examples.
         
-        Based on pure topology:
-          - Uses merkle.py Node/ORIGIN for structure
-          - Computes ΔW (weight difference) as transformation
-          - Finds invariant across all examples
-          - Creates new α-axiom if invariant exists
+        Uses Rust kernel for invariant metrics calculation.
+        Computes ΔI (invariant vector difference) across all examples.
+        Creates new α-axiom if invariant exists and MDL compression is beneficial.
         
         Args:
             examples: List of (input_label, output_label) pairs
             relation: Relation type for the discovered rule
             atomic: If True, treat each character as Ω (Token-Level).
                     If False, encode to bit trees (Bit-Level).
-                    Default True for text - like DNA ignoring atoms.
         
         Returns:
             The discovered invariant or None
         """
+        from invariant_kernel import get_invariant_metrics
+        
         print(f"\n--- CYCLE δ: DISCOVER ({len(examples)} examples, atomic={atomic}) ---")
         
         if len(examples) < 2:
             print("  [!] Need at least 2 examples")
             return None
         
-        # Import topology functions with fallback
-        Node = None
-        ORIGIN = None
-        encode_string = None
-        
-        try:
-            from .merkle import Node, ORIGIN, encode_string
-        except ImportError:
-            # Define locally as fallback
-            class Node:
-                def __init__(self, left=None, right=None):
-                    self.left = left
-                    self.right = right
-                @property
-                def is_origin(self):
-                    return self.left is None and self.right is None
-            
-            ORIGIN = Node()
-            def Dyad(a, b): return Node(a, b)
-            
-            def encode_byte(byte_val):
-                chain = ORIGIN
-                for i in range(8):
-                    bit = (byte_val >> i) & 1
-                    bit_node = ORIGIN if bit == 0 else Dyad(ORIGIN, ORIGIN)
-                    chain = Dyad(bit_node, chain)
-                return chain
-            
-            def encode_string(s):
-                chain = ORIGIN
-                for b in reversed(s.encode('utf-8')):
-                    chain = Dyad(encode_byte(b), chain)
-                return chain
-        
-        # === ATOMIC ENCODING (Token-Level) ===
-        # Per DNA principle: don't look at atoms, look at nucleotides
-        # Each character is Ω (indivisible atom for this task)
-        
-        def encode_atomic(s: str) -> Node:
-            """
-            Token-Level Encoding (Renormalization).
-            
-            Each character → Ω (atom)
-            String → Chain of Dyads
-            
-            'abc' → Δ(Ωa, Δ(Ωb, Δ(Ωc, Ω)))
-            
-            W('abc') = 5 (3 atoms + 2 dyads)
-            D('abc') = 3
-            L('abc') = 4 (3 letter atoms + 1 tail Ω)
-            """
-            chain = ORIGIN
-            for char in reversed(s):
-                # Each char is an ATOM (Ω with identity)
-                # We use a unique Ω per char type
-                atom = Node()  # Ω
-                chain = Node(atom, chain)  # Δ(Ωchar, rest)
-            return chain
-        
-        # Select encoder based on mode
-        encoder = encode_atomic if atomic else encode_string
-        
-        # === INVARIANT VECTOR FUNCTIONS  ===
-        
-        def compute_weight(node: Node) -> int:
-            """W(n): Structural complexity. W(Ω)=0, W(Δ(a,b))=W(a)+W(b)+1"""
-            if node.is_origin:
-                return 0
-            return compute_weight(node.left) + compute_weight(node.right) + 1
-        
-        def compute_depth(node: Node) -> int:
-            """D(n): Maximum depth. D(Ω)=0, D(Δ(a,b))=max(D(a),D(b))+1"""
-            if node.is_origin:
-                return 0
-            return max(compute_depth(node.left), compute_depth(node.right)) + 1
-        
-        def compute_leaves(node: Node) -> int:
-            """L(n): Number of leaves (Ω nodes). L(Ω)=1, L(Δ(a,b))=L(a)+L(b)"""
-            if node.is_origin:
-                return 1
-            return compute_leaves(node.left) + compute_leaves(node.right)
-        
-        def compute_shape(node: Node) -> str:
-            """S(n): Structural signature (topology without values). For pattern matching."""
-            if node.is_origin:
-                return "O"  # Origin mark
-            return f"D({compute_shape(node.left)},{compute_shape(node.right)})"
-        
-        def invariant_vector(node: Node) -> tuple:
-            """I(n) = (W, D, L, S_hash) - full invariant signature"""
-            w = compute_weight(node)
-            d = compute_depth(node)
-            l = compute_leaves(node)
-            s = hash(compute_shape(node)) % 10000  # Compact shape hash
-            return (w, d, l, s)
-        
         def delta_vector(iv_in: tuple, iv_out: tuple) -> tuple:
             """ΔI = I(out) - I(in) for comparable metrics"""
             return (
-                iv_out[0] - iv_in[0],  # ΔW
-                iv_out[1] - iv_in[1],  # ΔD
-                iv_out[2] - iv_in[2],  # ΔL
-                iv_out[3] == iv_in[3], # S_same (shape preserved?)
+                iv_out[0] - iv_in[0],  # ΔW (weight)
+                iv_out[1] - iv_in[1],  # ΔD (depth)
+                iv_out[2] - iv_in[2],  # ΔL (leaves)
+                iv_out[3] == iv_in[3], # S_same (shape hash match?)
             )
         
-        # Step 1: Compute Δ-vector for each example
+        # Step 1: Compute Δ-vector for each example using Rust kernel
         deltas = []
         for inp_lbl, out_lbl in examples:
-            inp_node = encoder(inp_lbl)
-            out_node = encoder(out_lbl)
-            
-            iv_in = invariant_vector(inp_node)
-            iv_out = invariant_vector(out_node)
+            iv_in = get_invariant_metrics(inp_lbl, atomic)
+            iv_out = get_invariant_metrics(out_lbl, atomic)
             dv = delta_vector(iv_in, iv_out)
             
             print(f"  {inp_lbl} → {out_lbl}:")
@@ -755,10 +679,8 @@ class Reactor:
             print(f"    ΔW = {invariant[0]}, ΔD = {invariant[1]}, ΔL = {invariant[2]}, S_same = {invariant[3]}")
             
             # Step 3: MDL Cost Calculation
-            # Rule cost: ~50 bytes (hash + metadata)
-            # Fact cost: ~40 bytes per edge
-            rule_cost = 50
-            facts_cost = len(examples) * 40
+            rule_cost = 50  # ~50 bytes (hash + metadata)
+            facts_cost = len(examples) * 40  # ~40 bytes per edge
             
             print(f"\n  [MDL] Cost analysis:")
             print(f"    Facts cost: {facts_cost} bytes ({len(examples)} × 40)")
@@ -775,27 +697,31 @@ class Reactor:
                 self.tank.labels[rule_hash] = rule_name
                 
                 # Step 5: Store rule (not individual facts)
-                # Add rule definition to tank
                 self.tank.absorb(rule_name, f"ΔW={dw},ΔD={dd},ΔL={dl}", "DEFINES", 10.0, 
                                Truth.ALPHA, f"DISCOVER_δ:VECTOR")
-                
-                # Track what this rule covers
                 self.tank.absorb(rule_name, relation, "APPLIES_TO", 10.0,
                                Truth.ALPHA, f"DISCOVER_δ:SCOPE")
                 
+                # Step 6: MDL Sublimation - supersede individual facts
+                superseded = self.tank.supersede(
+                    [bond_id(get_token_hash_hex(i), get_token_hash_hex(o), relation) 
+                     for i, o in examples],
+                    rule_hash
+                )
+                
                 print(f"  [LAW] Created: {rule_name}")
                 print(f"  [COMPRESSED] Replaced {len(examples)} facts with 1 rule")
-                print(f"  [PROOF] All {len(examples)} examples have identical ΔW")
+                print(f"  [SUBLIMATED] {superseded} edges marked as SUPERSEDED")
                 
                 return {
                     "invariant": invariant,
                     "rule_name": rule_name,
                     "compression_ratio": compression_ratio,
                     "facts_replaced": len(examples),
+                    "edges_sublimated": superseded,
                 }
             else:
                 print(f"    → NO COMPRESS: Rule not cheaper, keeping facts")
-                # Store facts individually
                 for inp_lbl, out_lbl in examples:
                     self.tank.absorb(inp_lbl, out_lbl, relation, 10.0, Truth.ALPHA, 
                                    f"DISCOVER_δ:UNCOMPRESSED")

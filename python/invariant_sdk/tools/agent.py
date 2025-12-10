@@ -1,13 +1,10 @@
 #!/usr/bin/env python3
 """
-StructuralAgent — Clean L0-Compliant Implementation
+StructuralAgent — Minimal Streaming Protocol (Pure L0)
 
-Key Physics:
-1. Conservation Law: Every token preserved, Agent returns indices/labels only
-2. Single-Shot Phase 1: One LLM call for cuts + relations
-3. k-Sigma Phase 2: Threshold from statistics, not hardcoded
-4. Batch Classification: One LLM call for all inter-doc pairs
-5. Separation: Agent proposes (η), Physics validates (σ/λ/α)
+ONLY streaming protocol. No search, no single-shot, no batch.
+
+Core: LLM → quotes → blocks → Symbol Nodes → Tank edges
 """
 
 import json
@@ -17,686 +14,231 @@ from dataclasses import dataclass
 
 logger = logging.getLogger(__name__)
 
-# Valid relation types (from L0 Physics)
+# Valid relation types (L0 Physics)
 VALID_RELATIONS = {"IMP", "NOT", "EQUALS", "GATE"}
 
 
 class IngestionError(Exception):
-    """Raised when LLM returns invalid data that violates Conservation Law."""
-    pass
+    """LLM returned invalid data."""
 
 
 @dataclass
-class Symbol:
-    """Symbol definition or reference (backward linking)."""
-    block_idx: int           # Which block this applies to
-    defines: Optional[str] = None    # Concept defined here (e.g., "var_transmission")
-    refers_to: Optional[str] = None  # Concept referenced here
+class Concept:
+    """Concept mention (Pure Topology)."""
+    name: str   # e.g., "inflation"
+    type: str   # "DEF" or "REF"
 
 
 @dataclass
-class DocumentStructure:
-    """Result of single-shot structure analysis.
-    
-    Triple Validation:
-        - cuts: exact positions (numbers)
-        - validation_quotes: text snippets (quotes) 
-        - symbols: logical structure (backward links)
-    
-    All three required to detect LLM hallucinations.
-    """
-    cuts: List[int]              # Segment boundaries (numbers)
-    validation_quotes: List[str]  # Quote from end of each segment (text)
-    relations: List[str]          # Relations between consecutive segments  
-    symbols: List[Symbol]         # Backward links (projection recovery)
+class StreamState:
+    """Streaming state (Pure L0: only ephemeral pointer)."""
+    last_block_id: Optional[str] = None
 
 
 class StructuralAgent:
     """
-    LLM-powered Agent for text structure analysis.
+    Minimal Agent for streaming text → Tank.
     
-    Adheres to L0 Physics:
-    - Blind Surgeon: Returns positions/labels, not text
-    - Conservation Law: All tokens preserved
-    - Separation: Agent proposes, Physics validates
+    API:
+        digest(source, text) → int  # Process document
     
-    Phase 1 (Intra-Document):
-        - Single-shot: cuts + relations in one LLM call
-        - Creates temporal + logical edges within document
-    
-    Phase 2 (Inter-Document):
-        - k-sigma: Adaptive threshold from score distribution
-        - Batch: One LLM call for all candidate pairs
-        - Creates logical edges between documents
+    Internal:
+        - LLM extracts quotes + concepts
+        - Python finds positions (Agent-Physics separation)
+        - Creates Symbol Nodes + edges
     """
     
     # ========================================================================
-    # PROMPTS
+    # PROMPT
     # ========================================================================
     
-    STRUCTURE_PROMPT = """Analyze text structure with TRIPLE VALIDATION.
+    QUOTES_PROMPT = """Given text, identify semantic blocks using QUOTES.
 
-TEXT ({text_len} chars):
+TEXT:
 {text}
 
-Output JSON with FOUR REQUIRED fields:
+{context_section}
 
-1. "cuts": [int] - exact position where each block ENDS
-   - Ascending order, last = {text_len}
-   - Example: [45, 120, 200]
-
-2. "validation_quotes": [string] - last 3-5 words of each block (EXACT quote)
-   - Used to verify "cuts" are correct
-   - Must match text exactly
-   - Length MUST equal len(cuts)
-   - Example: ["...overheated.", "...broken.", "...completely."]
-
-3. "relations": [string] - relation from block[i] to block[i+1]
-   - Length MUST equal len(cuts)
-   - Types: IMP, NOT, EQUALS, GATE
-
-4. "symbols": [object] - backward links (optional but encouraged)
-   - {{"block": idx, "defines": "concept_name"}}
-   - {{"block": idx, "refers_to": "concept_name"}}
-
-Example:
+Return JSON:
 {{
-  "cuts": [29, 42, 67],
-  "validation_quotes": ["overheated.", "boiling.", "completely."],
-  "relations": ["IMP", "IMP"],
-  "symbols": [
-    {{"block": 0, "defines": "transmission_issue"}},
-    {{"block": 2, "refers_to": "transmission_issue"}}
+  "blocks": [
+    {{
+      "start_quote": "First few words of block",
+      "end_quote": "last few words of block",
+      "logic": "IMP|NOT|EQUALS|GATE|ORIGIN",
+      "concepts": [
+        {{"name": "concept_name", "type": "DEF"}},
+        {{"name": "another", "type": "REF"}}
+      ]
+    }}
   ]
 }}
 
-Return ONLY the JSON object:"""
-
-    BATCH_CLASSIFY_PROMPT = """Classify relations for {count} pairs from DIFFERENT documents.
-
-{pairs_text}
-
-Relation types:
-- IMP: one implies/explains the other
-- NOT: contradiction
-- EQUALS: same meaning, different wording
-- GATE: one conditions the other
-- NONE: no meaningful relation
-
-Return JSON array of {count} strings: ["rel1", "rel2", ...]
-Return ONLY the JSON array:"""
-
-    SEARCH_PROMPT = """Decompose query into atomic sub-queries.
-
-QUERY: {query}
-
 Rules:
-- Split distinct concepts
-- Keep simple: 1-3 sub-queries
-- If already atomic, return list with 1 item
+1. start_quote/end_quote MUST be exact text from input
+2. logic: REQUIRED for blocks 2+. Use ORIGIN only for first block.
+   - IMP: block implies/follows from previous
+   - NOT: block contradicts previous
+   - EQUALS: block restates previous differently
+   - GATE: block is conditional on previous
+   - ORIGIN: first block only (no predecessor)
+3. concepts: list concepts mentioned with type
+4. {known_concepts_hint}
 
-Return JSON list: ["concept A", "concept B"]
-Return ONLY the JSON array:"""
+IMPORTANT: Use EXACT text for quotes, not paraphrases!
+"""
 
-    # ========================================================================
-    # INITIALIZATION
-    # ========================================================================
-    
-    def __init__(self, engine, llm: Callable[[str], str], k_sigma: float = 3.0):
+    def __init__(self, engine, llm: Callable[[str], str]):
         """
-        Initialize Agent.
-        
         Args:
-            engine: InvariantEngine instance
-            llm: Callable that takes prompt (str) and returns response (str)
-            k_sigma: Sigma multiplier for k-sigma threshold (default: 3.0)
-                    Higher = more conservative (fewer false positives)
+            engine: InvariantEngine
+            llm: Callable(prompt: str) -> response: str
         """
         self.engine = engine
         self.llm = llm
-        self.k_sigma = k_sigma
     
     # ========================================================================
-    # PUBLIC API
+    # PURE QUERY METHODS
     # ========================================================================
     
-    def digest(self, source: str, text: str) -> int:
+    def _get_known_concepts(self) -> List[str]:
+        """Query Tank for Symbol Nodes (Pure Function)."""
+        symbols = self.engine.block_store.get_by_source('__symbols__')
+        return [s['content'] for s in symbols]
+    
+    def _find_symbol(self, concept_name: str) -> Optional[str]:
+        """Find Symbol Node ID."""
+        from invariant_kernel import get_token_hash_hex
+        symbol_id = get_token_hash_hex(f"symbol:{concept_name}")
+        
+        if self.engine.block_store.exists(symbol_id):
+            return symbol_id
+        return None
+    
+    # ========================================================================
+    # MAIN API
+    # ========================================================================
+    
+    def digest(self, source: str, text: str, chunk_size: int = 8000) -> int:
         """
-        Process document: analyze → store → link → integrate.
-        
-        Phase 1 (Intra-Document):
-            1. LLM analyzes structure (cuts + relations + symbols) — ONE call
-            2. Physics stores blocks
-            3. Physics creates edges (temporal + logical + backward links)
-        
-        Phase 2 (Inter-Document):
-            4. Physics finds candidates (resonate + k-sigma)
-            5. LLM classifies pairs (batch) — ONE call for all
-            6. Physics stores inter-doc edges
-        
-        Phase 3 (Inference):
-            7. Physics derives new knowledge (evolve)
+        Process document with auto-streaming.
         
         Args:
             source: Document identifier
-            text: Full text content
+            text: Full text
+            chunk_size: Characters per chunk
         
         Returns:
-            Number of blocks created
-        
-        Raises:
-            IngestionError: If LLM returns invalid data
+            Total blocks created
         """
-        # --- PHASE 1: SINGLE-SHOT ARCHITECT ---
-        structure = self._analyze_structure(text)
+        state = StreamState()
+        total_blocks = 0
         
-        # Store blocks (Physics enforces Conservation Law)
-        count = self.engine.ingest(source, text, structure.cuts)
+        # Split into chunks
+        chunks = self._split_text(text, chunk_size)
         
-        # Get created blocks
-        blocks = self.engine.block_store.get_by_source(source)
-        if not blocks:
-            return count
+        if len(chunks) > 1:
+            logger.info(f"Streaming: {len(chunks)} chunks")
         
-        # Store intra-document edges (temporal + logical)
-        self._store_intra_edges(blocks, structure.relations)
+        for idx, chunk_info in enumerate(chunks):
+            if len(chunks) > 1:
+                logger.info(f"Chunk {idx+1}/{len(chunks)}")
+            
+            # Query Tank for known concepts
+            known_concepts = self._get_known_concepts()
+            
+            # LLM analysis
+            structure = self._analyze_quotes(
+                chunk_info['text'],
+                known_concepts=known_concepts,
+                is_continuation=(idx > 0)
+            )
+            
+            # Python extracts positions
+            blocks = self._extract_blocks(
+                chunk_info['text'],
+                structure,
+                chunk_info['start_global'],
+                source
+            )
+            
+            # Create edges
+            self._link_blocks(blocks, structure, state)
+            
+            total_blocks += len(blocks)
         
-        # Apply symbols (backward links via symbol table)
-        self._apply_symbols(blocks, structure.symbols)
-        
-        # --- PHASE 2: INTER-DOCUMENT INTEGRATION ---
-        inter_edges = self._integrate(blocks)
-        if self.engine.verbose and inter_edges > 0:
-            logger.info(f"Phase 2: Created {inter_edges} inter-document edges")
-        
-        # --- PHASE 3: LOGICAL INFERENCE ---
-        self.engine.evolve()
-        self.engine._persist()
-        
-        return count
-    
-    def search(self, query: str, limit: int = 10) -> List:
-        """
-        Smart search with query decomposition.
-        
-        1. Decomposes query into sub-queries via LLM
-        2. Executes resonate() for each
-        3. Aggregates (blocks matching multiple concepts rank higher)
-        
-        Args:
-            query: Search query
-            limit: Max results
-        
-        Returns:
-            List of Block objects, ranked by relevance
-        """
-        # 1. Decompose
-        sub_queries = self._decompose_query(query)
-        if not sub_queries:
-            return []
-        
-        # 2. Search each
-        candidates = {}  # block_id -> {block, count}
-        
-        for sub_q in sub_queries:
-            results = self.engine.resonate(sub_q, top_k=limit * 2)
-            for block in results:
-                bid = block.id
-                if bid not in candidates:
-                    candidates[bid] = {"block": block, "count": 0}
-                candidates[bid]["count"] += 1
-        
-        # 3. Aggregate (intersection logic)
-        ranked = sorted(
-            candidates.values(),
-            key=lambda x: x["count"],
-            reverse=True
-        )
-        
-        return [item["block"] for item in ranked[:limit]]
+        return total_blocks
     
     # ========================================================================
-    # PHASE 1: INTRA-DOCUMENT ANALYSIS
+    # LLM INTERACTION
     # ========================================================================
     
-    def _analyze_structure(self, text: str) -> DocumentStructure:
+    def _analyze_quotes(self, text: str, known_concepts: List[str] = None,
+                        is_continuation: bool = False) -> dict:
         """
-        Single-shot structure analysis: cuts + relations + symbols in ONE LLM call.
+        LLM extracts structure via quotes.
         
         Returns:
-            DocumentStructure with cuts, relations, and symbols
-        
-        Raises:
-            IngestionError: If LLM returns invalid data
+            dict with 'blocks' array
         """
-        text_len = len(text)
-        prompt = self.STRUCTURE_PROMPT.format(
-            text=text,
-            text_len=text_len
+        if known_concepts is None:
+            known_concepts = []
+        
+        # Build context
+        if is_continuation and known_concepts:
+            context = f"CONTEXT: Continuation. Known concepts: {', '.join(known_concepts[:20])}"
+        else:
+            context = ""
+        
+        concepts_hint = f"Known: {', '.join(known_concepts[:20])}" if known_concepts else "No prior concepts"
+        
+        # Call LLM
+        prompt = self.QUOTES_PROMPT.format(
+            text=text[:10000],
+            context_section=context,
+            known_concepts_hint=concepts_hint
         )
         
         response = self.llm(prompt)
         
-        # Parse JSON
+        # Parse & validate
         try:
             response = self._clean_json(response)
             data = json.loads(response)
             
-            cuts = data.get("cuts", [])
-            validation_quotes = data.get("validation_quotes", [])
-            relations = data.get("relations", [])
-            symbols_data = data.get("symbols", [])
+            if 'blocks' not in data:
+                raise IngestionError("Missing 'blocks' field")
             
-            # Validate cuts
-            if not isinstance(cuts, list):
-                raise IngestionError("cuts must be array")
-            
-            # Validate: ascending order
-            for i in range(len(cuts) - 1):
-                if cuts[i] >= cuts[i + 1]:
-                    raise IngestionError(f"Cuts not ascending: {cuts}")
-            
-            # Validate: within bounds
-            for pos in cuts:
-                if not (0 < pos <= text_len):
-                    raise IngestionError(f"Cut {pos} out of bounds [1, {text_len}]")
-            
-            # Validate validation_quotes (LEVEL 1: Text validation)
-            if not isinstance(validation_quotes, list):
-                raise IngestionError("validation_quotes must be array")
-            
-            if len(validation_quotes) != len(cuts):
-                raise IngestionError(
-                    f"validation_quotes length ({len(validation_quotes)}) "
-                    f"must equal cuts length ({len(cuts)})"
-                )
-            
-            # TRIPLE VALIDATION: Verify quotes match cuts
-            for i, (cut_pos, quote) in enumerate(zip(cuts, validation_quotes)):
-                quote = quote.strip()
-                if not quote:
-                    continue  # Empty quote - skip validation
+            # Validate
+            for i, block in enumerate(data['blocks']):
+                if 'start_quote' not in block:
+                    raise IngestionError(f"Block {i}: missing start_quote")
+                if 'end_quote' not in block:
+                    raise IngestionError(f"Block {i}: missing end_quote")
                 
-                # Extract text around cut position
-                window_start = max(0, cut_pos - len(quote) - 10)
-                window_end = min(text_len, cut_pos + 5)
-                window = text[window_start:window_end]
+                # Normalize and validate logic
+                logic = block.get('logic', '').upper() if block.get('logic') else None
                 
-                # Check if quote appears in window
-                if quote not in window:
-                    # Try fuzzy match (quote might have minor differences)
-                    quote_lower = quote.lower().strip('.,!? ')
-                    window_lower = window.lower()
-                    
-                    if quote_lower not in window_lower:
-                        raise IngestionError(
-                            f"Validation quote #{i} not found near cut {cut_pos}.\n"
-                            f"Quote: '{quote}'\n"
-                            f"Window: '{window}'\n"
-                            f"LLM hallucination detected!"
-                        )
+                if i == 0:
+                    # First block: ORIGIN or null is allowed
+                    if logic and logic not in VALID_RELATIONS and logic != 'ORIGIN':
+                        raise IngestionError(f"Block 0: invalid logic '{logic}'")
+                    block['logic'] = logic if logic != 'ORIGIN' else None  # ORIGIN → null
+                else:
+                    # Subsequent blocks: logic is REQUIRED
+                    if not logic:
+                        raise IngestionError(f"Block {i}: logic is REQUIRED (use IMP|NOT|EQUALS|GATE)")
+                    if logic not in VALID_RELATIONS:
+                        raise IngestionError(f"Block {i}: invalid logic '{logic}'")
+                    block['logic'] = logic
             
-            # Validate relations (LEVEL 2: Structure validation)
-            if not isinstance(relations, list):
-                raise IngestionError("relations must be array")
-            
-            expected_rels = len(cuts)
-            if len(relations) != expected_rels:
-                raise IngestionError(
-                    f"Expected {expected_rels} relations, got {len(relations)}"
-                )
-            
-            # Validate relation types
-            for rel in relations:
-                if rel.upper() not in VALID_RELATIONS:
-                    raise IngestionError(f"Invalid relation: {rel}")
-            
-            # Parse symbols
-            symbols = []
-            if not isinstance(symbols_data, list):
-                logger.warning(f"symbols must be list, got {type(symbols_data)}")
-            else:
-                for sym_item in symbols_data:
-                    if not isinstance(sym_item, dict):
-                        continue
-                    
-                    block_idx = sym_item.get("block")
-                    defines = sym_item.get("defines")
-                    refers_to = sym_item.get("refers_to")
-                    
-                    # Validate block index
-                    if block_idx is None or not (0 <= block_idx < len(cuts)):
-                        logger.warning(f"Invalid symbol block index: {block_idx}")
-                        continue
-                    
-                    # Validate: either defines OR refers_to (not both)
-                    if defines and refers_to:
-                        logger.warning(f"Symbol has both defines and refers_to: {sym_item}")
-                        continue
-                    
-                    if not defines and not refers_to:
-                        logger.warning(f"Symbol has neither defines nor refers_to: {sym_item}")
-                        continue
-                    
-                    symbols.append(Symbol(
-                        block_idx=block_idx,
-                        defines=defines,
-                        refers_to=refers_to
-                    ))
-            
-            return DocumentStructure(
-                cuts=cuts,
-                validation_quotes=validation_quotes,
-                relations=[r.upper() for r in relations],
-                symbols=symbols
-            )
-            
+            return data
+        
         except json.JSONDecodeError as e:
             raise IngestionError(f"Invalid JSON: {e}")
-        except KeyError as e:
-            raise IngestionError(f"Missing field: {e}")
-    
-    def _store_intra_edges(self, blocks: List[dict], relations: List[str]):
-        """
-        Store intra-document edges (temporal + logical).
-        
-        Args:
-            blocks: List of block dicts from block_store
-            relations: Relations between consecutive blocks
-        """
-        from ..core.reactor import Truth
-        
-        for i in range(len(blocks) - 1):
-            # Temporal edge (Layer 0)
-            self.engine.tank.absorb(
-                blocks[i]['id'], blocks[i + 1]['id'],
-                "TEMP", 1.0, Truth.SIGMA, f"seq:{blocks[i]['source']}"
-            )
-            
-            # Logical edge (Layer 1)
-            if  i < len(relations):
-                self.engine.tank.absorb(
-                    blocks[i]['id'], blocks[i + 1]['id'],
-                    relations[i], 1.0, Truth.SIGMA, "agent:structure"
-                )
-    
-    def _apply_symbols(self, blocks: List[dict], symbols: List[Symbol]):
-        """
-        Apply symbol table resolution to create backward edges.
-        
-        Projection Theory:
-            Text linearizes graph → backward edges become invisible.
-            Symbols explicitly encode these lost edges.
-        
-        Algorithm:
-            1. Build symbol table: name → block_id (for "defines")
-            2. Resolve references: "refers_to" → lookup in table
-            3. Create edges: referring_block → defining_block
-        
-        Args:
-            blocks: List of block dicts from block_store
-            symbols: List of Symbol objects from LLM
-        """
-        from ..core.reactor import Truth
-        
-        # Step 1: Build symbol table
-        symbol_table = {}  # name → block_id
-        
-        for sym in symbols:
-            if sym.defines:
-                block_id = blocks[sym.block_idx]['id']
-                symbol_table[sym.defines] = block_id
-                
-                if self.engine.verbose:
-                    logger.debug(f"Symbol defined: '{sym.defines}' → Block {block_id}")
-        
-        # Step 2: Resolve references and create backward edges
-        edge_count = 0
-        for sym in symbols:
-            if sym.refers_to:
-                target_id = symbol_table.get(sym.refers_to)
-                
-                if target_id is None:
-                    logger.warning(
-                        f"Undefined symbol reference: '{sym.refers_to}' "
-                        f"in block {sym.block_idx}"
-                    )
-                    continue
-                
-                source_id = blocks[sym.block_idx]['id']
-                
-                # Validate: backward link only (refers_to earlier block)
-                if source_id == target_id:
-                    logger.warning(f"Self-reference ignored: {sym.refers_to}")
-                    continue
-                
-                # Create backward edge (REF type)
-                self.engine.tank.absorb(
-                    source_id, target_id,
-                    "REF", 1.0, Truth.SIGMA, f"symbol:{sym.refers_to}"
-                )
-                edge_count += 1
-                
-                if self.engine.verbose:
-                    logger.debug(
-                        f"Backward edge: Block {source_id} → {target_id} "
-                        f"(symbol: {sym.refers_to})"
-                    )
-        
-        if self.engine.verbose and edge_count > 0:
-            logger.info(f"Phase 1: Created {edge_count} backward edges via symbols")
-    
-    # ========================================================================
-    # PHASE 2: INTER-DOCUMENT INTEGRATION
-    # ========================================================================
-    
-    def _integrate(self, new_blocks: List[dict]) -> int:
-        """
-        Phase 2: Link new blocks to existing knowledge.
-        
-        Strategy (L0 Physics compliant):
-        1. For each block, resonate() to find candidates (cheap vector search)
-        2. Compute k-sigma threshold from score distribution
-        3. Filter candidates above threshold (Ice vs Water)
-        4. Batch classify all pairs (ONE LLM call)
-        5. Store validated edges
-        
-        Args:
-            new_blocks: List of newly created blocks
-        
-        Returns:
-            Number of inter-document edges created
-        """
-        if not new_blocks:
-            return 0
-        
-        new_source = new_blocks[0]['source']
-        
-        # Step 1: Collect all candidates (Physics proposes)
-        all_scores = []
-        candidate_pairs = []  # (block, candidate_block)
-        
-        for block in new_blocks:
-            # Skip short blocks (noise filter)
-            if len(block['content']) < 30:
-                continue
-            
-            try:
-                # Resonate: find similar blocks (cheap!)
-                results = self.engine.resonate(block['content'], top_k=10)
-                
-                # Collect scores for k-sigma calculation
-                external_results = [
-                    r for r in results 
-                    if r.source != new_source
-                ]
-                
-                for r in external_results:
-                    all_scores.append(r.score)
-                    candidate_pairs.append((block, r))
-                    
-            except Exception as e:
-                logger.warning(f"Resonate failed for block {block['id']}: {e}")
-                continue
-        
-        if not all_scores:
-            return 0  # No external candidates found
-        
-        # Step 2: k-Sigma Calibration (Physics determines threshold)
-        threshold = self._compute_ksigma_threshold(all_scores)
-        
-        # Step 3: Filter by threshold (Ice vs Water)
-        hot_pairs = [
-            (block, cand) for block, cand in candidate_pairs
-            if cand.score > threshold
-        ]
-        
-        if not hot_pairs:
-            return 0  # All candidates below threshold (Water phase)
-        
-        # Step 4: Batch Classification (Agent evaluates, ONE call)
-        relations = self._classify_batch(hot_pairs)
-        
-        # Step 5: Store validated edges (Physics accepts)
-        from ..core.reactor import Truth
-        edge_count = 0
-        
-        for (block, cand), rel in zip(hot_pairs, relations):
-            if rel != "NONE":
-                self.engine.tank.absorb(
-                    block['id'], cand.id,
-                    rel, cand.score, Truth.SIGMA, "agent:integration"
-                )
-                edge_count += 1
-        
-        return edge_count
-    
-    def _compute_ksigma_threshold(self, scores: List[float]) -> float:
-        """
-        Compute k-sigma threshold for Ice↔Water phase transition.
-        
-        From TEXT_TOPOLOGY_SPEC.md Section 9:
-        "k-sigma threshold is empirical proxy for Ice↔Water transition"
-        
-        Args:
-            scores: List of similarity scores
-        
-        Returns:
-            Threshold value: μ + k*σ
-        """
-        if len(scores) < 2:
-            return 0.5  # Fallback for insufficient data
-        
-        # Statistics
-        mu = sum(scores) / len(scores)
-        variance = sum((s - mu) ** 2 for s in scores) / len(scores)
-        sigma = variance ** 0.5
-        
-        # Threshold = μ + k*σ (Ice ↔ Water boundary)
-        threshold = mu + self.k_sigma * sigma
-        
-        if self.engine.verbose:
-            logger.debug(
-                f"k-sigma calibration: μ={mu:.3f}, σ={sigma:.3f}, "
-                f"threshold={threshold:.3f} (k={self.k_sigma})"
-            )
-        
-        return threshold
-    
-    def _classify_batch(self, pairs: List[tuple]) -> List[str]:
-        """
-        Classify multiple pairs in ONE LLM call (batch optimization).
-        
-        MDL Law: One call for N pairs < N calls for N pairs
-        
-        Args:
-            pairs: List of (block_dict, Block) tuples
-        
-        Returns:
-            List of relation strings (same length as pairs)
-        """
-        if not pairs:
-            return []
-        
-        # Format pairs for prompt
-        pairs_text = "\n\n".join([
-            f"PAIR {i+1}:\n"
-            f"  A (from {block['source']}): {block['content'][:100]}...\n"
-            f"  B (from {cand.source}): {cand.content[:100]}..."
-            for i, (block, cand) in enumerate(pairs)
-        ])
-        
-        prompt = self.BATCH_CLASSIFY_PROMPT.format(
-            count=len(pairs),
-            pairs_text=pairs_text
-        )
-        
-        response = self.llm(prompt)
-        
-        # Parse JSON
-        try:
-            response = self._clean_json(response)
-            relations = json.loads(response)
-            
-            if not isinstance(relations, list):
-                logger.warning(f"Batch classify returned non-list: {relations}")
-                return ["NONE"] * len(pairs)
-            
-            if len(relations) != len(pairs):
-                logger.warning(
-                    f"Batch classify length mismatch: expected {len(pairs)}, "
-                    f"got {len(relations)}"
-                )
-                # Pad or truncate
-                if len(relations) < len(pairs):
-                    relations.extend(["NONE"] * (len(pairs) - len(relations)))
-                else:
-                    relations = relations[:len(pairs)]
-            
-            # Validate and normalize
-            valid_rels = []
-            for rel in relations:
-                rel_upper = str(rel).upper()
-                if rel_upper in VALID_RELATIONS or rel_upper == "NONE":
-                    valid_rels.append(rel_upper)
-                else:
-                    # Invalid relation → NONE (safe fallback)
-                    logger.warning(f"Invalid relation '{rel}' → NONE")
-                    valid_rels.append("NONE")
-            
-            return valid_rels
-            
-        except json.JSONDecodeError as e:
-            logger.warning(f"Batch classify JSON parse error: {e}")
-            return ["NONE"] * len(pairs)
-    
-    # ========================================================================
-    # SEARCH HELPERS
-    # ========================================================================
-    
-    def _decompose_query(self, query: str) -> List[str]:
-        """Decompose complex query into atomic sub-queries."""
-        prompt = self.SEARCH_PROMPT.format(query=query)
-        response = self.llm(prompt)
-        
-        try:
-            response = self._clean_json(response)
-            sub_queries = json.loads(response)
-            
-            if not isinstance(sub_queries, list):
-                return [query]  # Fallback: treat as atomic
-            
-            return [str(q) for q in sub_queries if q]
-            
-        except json.JSONDecodeError:
-            return [query]  # Fallback: treat as atomic
-    
-    # ========================================================================
-    # UTILITIES
-    # ========================================================================
     
     def _clean_json(self, response: str) -> str:
-        """Remove markdown code fences if present."""
+        """Remove markdown fences."""
         response = response.strip()
         if response.startswith("```"):
             lines = response.split("\n")
@@ -706,3 +248,210 @@ Return ONLY the JSON array:"""
                 lines = lines[:-1]
             response = "\n".join(lines)
         return response.strip()
+    
+    # ========================================================================
+    # BLOCK EXTRACTION
+    # ========================================================================
+    
+    def _extract_blocks(self, text: str, structure: dict,
+                        global_offset: int, source: str) -> List[dict]:
+        """
+        Python finds positions from quotes.
+        
+        Returns:
+            List of block dicts with IDs
+        """
+        from invariant_kernel import get_token_hash_hex
+        
+        blocks = []
+        cursor = 0
+        
+        for i, item in enumerate(structure['blocks']):
+            start_q = item['start_quote'].strip()
+            end_q = item['end_quote'].strip()
+            
+            # Find positions
+            start_pos = text.find(start_q, cursor)
+            if start_pos == -1:
+                raise IngestionError(f"Block {i}: start_quote not found")
+            
+            # Check gap (Conservation Law)
+            if start_pos > cursor:
+                gap = text[cursor:start_pos].strip()
+                if gap and len(gap) > 10:
+                    raise IngestionError(f"Block {i}: gap detected (Conservation Law)")
+            
+            end_pos = text.find(end_q, start_pos)
+            if end_pos == -1:
+                raise IngestionError(f"Block {i}: end_quote not found")
+            
+            # Extract content
+            block_end = end_pos + len(end_q)
+            content = text[start_pos:block_end].strip()
+            
+            # Create ID
+            block_id = get_token_hash_hex(content)
+            
+            # Skip if exists (deduplication)
+            if self.engine.block_store.exists(block_id):
+                logger.debug(f"Block {i} already exists")
+                cursor = block_end
+                continue
+            
+            # Save to store
+            self.engine.block_store.save({
+                'id': block_id,
+                'source': source,
+                'content': content,
+                'position': global_offset + start_pos
+            })
+            
+            blocks.append({
+                'id': block_id,
+                'content': content,
+                'logic': item.get('logic'),
+                'concepts': item.get('concepts', []),
+                'source': source
+            })
+            
+            cursor = block_end
+        
+        # Final check
+        if cursor < len(text):
+            remainder = text[cursor:].strip()
+            if remainder and len(remainder) > 10:
+                raise IngestionError("Uncovered text (Conservation Law)")
+        
+        return blocks
+    
+    # ========================================================================
+    # GRAPH LINKING
+    # ========================================================================
+    
+    def _link_blocks(self, blocks: List[dict], structure: dict,
+                     state: StreamState):
+        """
+        Create edges: temporal + logical + Symbol Nodes.
+        """
+        from ..core.reactor import Truth
+        
+        for i, block in enumerate(blocks):
+            bid = block['id']
+            
+            # Temporal edge (always)
+            if state.last_block_id:
+                self.engine.tank.add_edge_hash(
+                    state.last_block_id, bid, "SEQ",
+                    energy=1.0, ring=Truth.SIGMA, source="time"
+                )
+            
+            # Logical edge (required for blocks 2+, validated in _analyze_quotes)
+            logic = block.get('logic')
+            if logic and state.last_block_id:
+                self.engine.tank.add_edge_hash(
+                    state.last_block_id, bid, logic,
+                    energy=0.9, ring=Truth.ETA, source="llm:logic"
+                )
+            
+            # Concept linking (Pure Topology)
+            for concept_data in block.get('concepts', []):
+                try:
+                    concept = Concept(**concept_data)
+                    self.link_concept(bid, concept, state)
+                except Exception as e:
+                    logger.warning(f"Failed to link concept {concept_data}: {e}")
+            
+            state.last_block_id = bid
+    
+    # ========================================================================
+    # SYMBOL NODES
+    # ========================================================================
+    
+    def create_symbol_node(self, concept_name: str) -> str:
+        """
+        Create or get Symbol Node (Pure Topology).
+        
+        Returns:
+            Symbol node ID
+        """
+        from invariant_kernel import get_token_hash_hex
+        
+        symbol_id = get_token_hash_hex(f"symbol:{concept_name}")
+        
+        if self.engine.block_store.exists(symbol_id):
+            return symbol_id
+        
+        # Create virtual node
+        self.engine.block_store.save({
+            'id': symbol_id,
+            'source': '__symbols__',
+            'content': concept_name,
+            'position': 0,
+            'is_symbol': True
+        })
+        
+        if self.engine.verbose:
+            logger.info(f"Symbol Node: {concept_name} → {symbol_id[:8]}")
+        
+        return symbol_id
+    
+    def link_concept(self, block_id: str, concept: Concept, state: StreamState):
+        """
+        Create DEF/REF edge to Symbol Node.
+        """
+        from ..core.reactor import Truth
+        
+        symbol_id = self.create_symbol_node(concept.name)
+        
+        relation = "DEF" if concept.type == "DEF" else "REF"
+        energy = 1.0 if concept.type == "DEF" else 0.8
+        
+        self.engine.tank.add_edge_hash(
+            block_id, symbol_id, relation,
+            energy=energy,
+            ring=Truth.SIGMA,
+            source=f"concept:{concept.name}"
+        )
+        
+        if self.engine.verbose:
+            logger.debug(f"{relation}: {block_id[:8]} → {concept.name}")
+    
+    # ========================================================================
+    # TEXT SPLITTING
+    # ========================================================================
+    
+    def _split_text(self, text: str, chunk_size: int) -> List[dict]:
+        """
+        Split text by paragraphs.
+        
+        Returns:
+            List of {text, start_global}
+        """
+        paragraphs = text.split('\n\n')
+        chunks = []
+        i = 0
+        
+        while i < len(paragraphs):
+            chunk_paras = []
+            char_count = 0
+            
+            while i < len(paragraphs) and char_count < chunk_size:
+                chunk_paras.append(paragraphs[i])
+                char_count += len(paragraphs[i])
+                i += 1
+            
+            if not chunk_paras:
+                break
+            
+            chunk_text = '\n\n'.join(chunk_paras)
+            
+            # Calculate offset
+            prev_paras = paragraphs[:i - len(chunk_paras)]
+            start_global = sum(len(p) + 2 for p in prev_paras)
+            
+            chunks.append({
+                'text': chunk_text,
+                'start_global': start_global
+            })
+        
+        return chunks

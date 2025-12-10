@@ -14,95 +14,101 @@ Prerequisites: Python 3.9+, Rust ([rustup.rs](https://rustup.rs))
 
 ```python
 from invariant_sdk import InvariantEngine
+from invariant_sdk.tools import StructuralAgent
 
 engine = InvariantEngine("./data")
+
+# Provide your LLM function
+def my_llm(prompt: str) -> str:
+    # Your LLM API call here
+    return response
+
+agent = StructuralAgent(engine, llm=my_llm)
 ```
 
-### Two Ways, Same Protocol (DocumentStructure)
-
-**Way 1: Manual (full control)**
+### Digest Text (Streaming Protocol)
 
 ```python
-from invariant_sdk.tools.agent import DocumentStructure
+text = """
+Module X depends on Library Y. 
+Library Y has a critical vulnerability.
+Therefore Module X is at risk.
+"""
 
-# Input data
-text = "Module X depends on Library Y. Library Y has vulnerability."
+# LLM extracts structure via quotes
+# chunk_size: adjust for your LLM's context window (default 8000)
+blocks = agent.digest("security_report", text, chunk_size=4000)
+print(f"Created {blocks} blocks")
 
-# Create structure manually
-structure = DocumentStructure(
-    cuts=[32, 60],
-    validation_quotes=["Library Y.", "vulnerability."],
-    relations=["IMP"],
-    symbols=[]
-)
-
-# Ingest
-engine.ingest("doc1", text, structure)
-
-# Query
+# Run inference
 engine.evolve()
+
+# Search
 results = engine.resonate("vulnerabilities")
 ```
 
-**Way 2: Automatic (LLM does it)**
+### How It Works
 
-```python
-from invariant_sdk.tools import StructuralAgent
+1. **Chunking**: Text split into ~8000 char chunks
+2. **LLM Analysis**: Identifies blocks using exact quotes
+3. **Validation**: Python verifies quote positions exist
+4. **Storage**: Blocks stored with logical edges
 
-# Input data
-text = "Module X depends on Library Y. Library Y has vulnerability."
+### LLM Protocol
 
-# LLM creates DocumentStructure automatically
-agent = StructuralAgent(engine, llm=my_llm)
-agent.digest("doc1", text)  # Triple validation
-
-# Smart search
-results = agent.search("impact of vulnerabilities")
+LLM receives text and returns JSON:
+```json
+{
+  "blocks": [
+    {
+      "start_quote": "Module X depends",
+      "end_quote": "Library Y.",
+      "logic": "ORIGIN",
+      "concepts": [{"name": "Module_X", "type": "DEF"}]
+    },
+    {
+      "start_quote": "Library Y has",
+      "end_quote": "vulnerability.",
+      "logic": "IMP",
+      "concepts": [{"name": "vulnerability", "type": "DEF"}]
+    }
+  ]
+}
 ```
-
-**Same protocol, different creation method.**
-
-## What Makes This Different
-
-**1. LLM Output Validation**
-- Catches hallucinations: if LLM says text ends at position 100, we verify the quote actually appears there
-- Triple-check: numbers + text + logic must all align
-- Invalid structures rejected before storage
-
-**2. Hybrid Search (Vector + Graph)**
-- Vector search finds semantic matches ("vulnerability" ≈ "security flaw")
-- Graph search follows logical links (A→B, B→C implies A→C)
-- Combined: find related concepts AND their logical relationships
-
-**3. Adaptive Thresholds**
-- No hardcoded similarity scores
-- k-sigma calibration: system learns what "similar enough" means from your data
-- Automatically filters noise without manual tuning
 
 ## API
 
 | Method | Description |
 |--------|-------------|
-| `ingest(source, text, structure)` | Validated ingestion with triple validation |
-| `resonate(query, mode)` | Search with interference |
-| `crystallize(threshold)` | Auto-link similar blocks |
-| `evolve()` | Run logical inference |
-| `forget(source)` | Delete document |
+| `agent.digest(source, text)` | Stream text via LLM |
+| `engine.resonate(query, mode)` | Search (VECTOR/MERKLE/BINOCULAR) |
+| `engine.evolve()` | Run logical inference |
+| `engine.forget(source)` | Delete document |
 | `get_prompt()` | Operator prompt for AI agents |
+
+## Logic Relations
+
+| Relation | Meaning | Example |
+|----------|---------|---------|
+| `ORIGIN` | First block | Start of document |
+| `IMP` | A implies B | "therefore", "because" |
+| `NOT` | A contradicts B | "but", "however" |
+| `EQUALS` | A = B | "means", "is defined as" |
+| `GATE` | A conditions B | "if", "when" |
 
 ## For AI Agents
 
 ```python
 from invariant_sdk import get_prompt
 
-system_prompt = get_prompt()  # Full operator prompt
+system_prompt = get_prompt()  # Full operator instructions
 ```
 
 ## Structure
 
 ```
 invariant-sdk/
-├── kernel/          # Rust (crystallize_hnsw)
+├── kernel/              # Rust (crystallize, merkle)
 ├── python/
 │   └── invariant_sdk/
 │       ├── engine.py           # Core engine

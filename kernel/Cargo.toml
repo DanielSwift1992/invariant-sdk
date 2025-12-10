@@ -16,3 +16,5 @@ python = ["pyo3/extension-module"]
 pyo3 = { version = "0.20", optional = true }
 rayon = "1.8"
 hnsw_rs = "0.2"
+sha2 = "0.10"
+hex = "0.4"
