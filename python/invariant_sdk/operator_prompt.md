@@ -32,16 +32,35 @@ The SDK provides a **topological knowledge base** (Tank) that:
 
 ## API Reference
 
-### `ingest(source, data, cuts=None) -> int`
-Store blocks with Conservation Law validation.
+### `ingest(source: str, text: str, structure=None) -> int`
+Store blocks with triple validation support.
+
+**Unified Protocol: DocumentStructure**
 
 ```python
-# List of strings (recommended)
-engine.ingest("doc1", ["Block one.", "Block two."])
+from invariant_sdk.tools.agent import DocumentStructure, Symbol
 
-# Raw text + cut positions  
-engine.ingest("doc1", raw_text, cuts=[45, 87])
+#  Way 1: Manual (you create structure)
+structure = DocumentStructure(
+    cuts=[32, 60],
+    validation_quotes=["Library Y.", "vulnerability."],
+    relations=["IMP"],
+    symbols=[]
+)
+engine.ingest("doc1", text, structure)
+
+# Way 2: Automatic (agent creates structure)
+agent.digest("doc1", text)  # LLM generates DocumentStructure
+
+# Legacy: List[int] still supported
+engine.ingest("doc1", text, [32, 60])  # Just cuts, no validation
 ```
+
+**DocumentStructure fields:**
+- `cuts`: Block end positions (required)
+- `validation_quotes`: Text verification (recommended)
+- `relations`: Sequential links (optional)
+- `symbols`: Backward links (optional)
 
 ### `resonate(signal, mode, top_k) -> List[Block]`
 Search the knowledge base.
@@ -80,7 +99,9 @@ from invariant_sdk.tools import StructuralAgent
 
 agent = StructuralAgent(engine, llm=my_llm)
 
-# 1. Ingest (Segments text + Links neighbors)
+# 1. Digest (Single-shot structure analysis + integration)
+# Phase 1: Analyzes structure (cuts + relations) in ONE call
+# Phase 2: Integrates with existing knowledge (batch classification)
 agent.digest("doc1", raw_text)
 
 # 2. Smart Search (Decomposes complex queries)
@@ -89,8 +110,40 @@ results = agent.search("complex query")
 ```
 
 ### LLM Protocols
-- **Ingestion**: Returns only Cut Positions (ints) and Relations (labels).
-- **Search**: Returns JSON list of atomic sub-queries.
+
+**Phase 1 (Intra-Document) - Single-Shot Analysis:**
+
+LLM receives:
+```
+ANALYZE TEXT STRUCTURE WITH TRIPLE VALIDATION
+Text: ...
+```
+
+LLM returns JSON with 4 required fields:
+```json
+{
+  "cuts": [29, 67],
+  "validation_quotes": ["overheated.", "completely."],
+  "relations": ["IMP"],
+  "symbols": [
+    {"block": 0, "defines": "concept_name"},
+    {"block": 1, "refers_to": "concept_name"}
+  ]
+}
+```
+
+**Fields:**
+- `cuts`: Exact positions where blocks END (numbers)
+- `validation_quotes`: Last 3-5 words of each block (text verification)
+- `relations`: Relation from block[i] to block[i+1] (IMP, NOT, EQUALS, GATE)
+- `symbols`: Backward links for pronouns/references (optional but recommended)
+
+**Phase 2 (Inter-Document):**
+- Batch classification for candidate pairs
+- Returns JSON array of relations
+
+**Search:**
+- Returns JSON list of atomic sub-queries
 
 ---
 

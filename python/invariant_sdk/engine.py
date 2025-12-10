@@ -64,26 +64,65 @@ class InvariantEngine:
         self.vector_store = VectorStore(self.data_dir / "vectors.pkl")
         self.embedder = get_embedder()
         
-    def ingest(self, source: str, text: str, cuts: List[int] = None) -> int:
+    def ingest(
+        self, 
+        source: str, 
+        text: str, 
+        structure = None  # DocumentStructure or List[int] (legacy)
+    ) -> int:
         """
-        Validated ingestion with Conservation Law enforcement.
+        Validated ingestion with triple validation support.
         
         Args:
             source: Document identifier
             text: Raw text (original, unmodified)
-            cuts: Optional list of split positions (from LLM segmenter)
+            structure: DocumentStructure (recommended) or List[int] cuts (legacy)
         
-        If cuts provided: validates that cuts perfectly reconstruct text.
-        If no cuts: auto-splits by paragraphs.
+        DocumentStructure provides:
+            - cuts: Split positions (Conservation Law)
+            - validation_quotes: Text verification (hallucination detection)
+            - relations: Sequential links
+            - symbols: Backward links
         
         Returns:
             Number of blocks created.
         
         Raises:
-            ValueError: If Conservation Law is violated.
+            ValueError: If Conservation Law violated or validation fails.
+            
+        Example:
+            # Option 1: Manual (full control)
+            from invariant_sdk.tools.agent import DocumentStructure, Symbol
+            structure = DocumentStructure(
+                cuts=[32, 60],
+                validation_quotes=["Library Y.", "vulnerability."],
+                relations=["IMP"],
+                symbols=[]
+            )
+            engine.ingest("doc1", text, structure)
+            
+            # Option 2: Agent (automatic)
+            agent.digest("doc1", text)  # Creates DocumentStructure via LLM
         """
-        if not isinstance(text, str):
-            raise ValueError("text must be str. Use StructuralAgent for automated ingestion.")
+        # Handle legacy List[int] format
+        if structure is not None and isinstance(structure, list):
+            # Legacy: just cuts
+            cuts = structure
+            validation_quotes = []
+            relations = []
+            symbols = []
+        elif structure is not None:
+            # DocumentStructure
+            cuts = structure.cuts
+            validation_quotes = getattr(structure, 'validation_quotes', [])
+            relations = getattr(structure, 'relations', [])
+            symbols = getattr(structure, 'symbols', [])
+        else:
+            # No structure: auto-split
+            cuts = None
+            validation_quotes = []
+            relations = []
+            symbols = []
         
         if cuts is not None:
             # Validate and apply cuts
@@ -93,6 +132,25 @@ class InvariantEngine:
             # CONSERVATION LAW: Validate
             if "".join(segments) != text:
                 raise ValueError("Conservation Law violated: cuts don't reconstruct text")
+            
+            # TRIPLE VALIDATION: Verify quotes if provided
+            if validation_quotes:
+                for i, (cut_pos, quote) in enumerate(zip(cuts[1:], validation_quotes)):
+                    if not quote.strip():
+                        continue
+                    
+                    # Extract window around cut
+                    window_start = max(0, cut_pos - len(quote) - 10)
+                    window = text[window_start:cut_pos]
+                    
+                    # Check quote appears
+                    if quote not in window:
+                        quote_lower = quote.lower().strip('.,!? ')
+                        window_lower = window.lower()
+                        if quote_lower not in window_lower:
+                            raise ValueError(
+                                f"Validation quote #{i} not found near cut {cut_pos}: '{quote}'"
+                            )
         else:
             # Fallback: paragraph splitting
             segments = [s.strip() for s in text.split('\n\n') if s.strip()]
@@ -129,14 +187,6 @@ class InvariantEngine:
         self._persist()
         return count
     
-    def observe(self, source: str, content: str) -> int:
-        """
-        Simple ingestion (paragraph-based splitting).
-        
-        For LLM-guided segmentation, use ingest() with cut positions.
-        """
-        return self.ingest(source, content, cuts=None)
-
     def resonate(self, signal: str, mode: SearchMode = SearchMode.BINOCULAR, top_k: int = 5) -> List[Block]:
         """
         Interference Pattern.

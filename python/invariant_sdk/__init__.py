@@ -8,7 +8,7 @@ Usage:
     from invariant_sdk import InvariantEngine, SearchMode, get_prompt
 
     engine = InvariantEngine("./data")
-    engine.observe("doc1", "text...")
+    engine.ingest("doc1", "text...", cuts=[5, 10])
     results = engine.resonate("query")
     
     # For AI agents:
