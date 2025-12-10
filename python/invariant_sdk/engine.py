@@ -32,17 +32,21 @@ class InvariantEngine:
     - forget(source): Delete documents
     """
 
-    def __init__(self, data_dir: str = "./data", verbose: bool = False):
+    def __init__(self, data_dir: str = "./data", verbose: bool = False, 
+                 use_embeddings: bool = True):
         """
         Initialize the engine.
         
         Args:
             data_dir: Directory for persistent storage (blocks.db, vectors.pkl, knowledge.tank)
             verbose: If True, print debug information
+            use_embeddings: If False, skip sentence-transformers loading (fixes mutex issues)
         """
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.verbose = verbose
+        self.use_embeddings = use_embeddings
+        self._embedder = None  # Lazy loaded
         
         if verbose:
             logging.basicConfig(level=logging.DEBUG)
@@ -62,7 +66,19 @@ class InvariantEngine:
             
         self.block_store = BlockStore(self.data_dir / "blocks.db")
         self.vector_store = VectorStore(self.data_dir / "vectors.pkl")
-        self.embedder = get_embedder()
+        # NOTE: embedder is now lazy-loaded via property
+    
+    @property
+    def embedder(self):
+        """Lazy-load embedder only when needed."""
+        if self._embedder is None:
+            if not self.use_embeddings:
+                raise RuntimeError(
+                    "Embeddings disabled (use_embeddings=False). "
+                    "Cannot use vector search or crystallize."
+                )
+            self._embedder = get_embedder()
+        return self._embedder
         
     def ingest(
         self, 
@@ -168,9 +184,10 @@ class InvariantEngine:
             # Store Physical (SQL)
             self.block_store.save(block_id, segment, segment, source, i)
             
-            # Store Wave (Vector)
-            vec = self.embedder.encode(segment)
-            self.vector_store.add(block_id, vec)
+            # Store Wave (Vector) — only if embeddings enabled
+            if self.use_embeddings:
+                vec = self.embedder.encode(segment)
+                self.vector_store.add(block_id, vec)
             
             # Store Topology (Tank)
             if hasattr(self.tank, 'absorb'):
