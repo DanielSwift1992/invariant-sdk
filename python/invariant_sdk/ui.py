@@ -839,15 +839,18 @@ HTML_PAGE = '''<!DOCTYPE html>
                     }
                     
                     // Build tooltip with snippet
-                    let tooltip = isLocal ? 'σ-fact from document' : 'α-context from global crystal';
-                    if (n.snippet) {
-                        tooltip = n.snippet;
-                    }
+                    let tooltip = isLocal ? 'Hover for context' : 'α-context from global crystal';
+                    
+                    // Add data attributes for lazy context loading
+                    const dataAttrs = (n.doc && n.line) 
+                        ? `data-doc="${escHtml(n.doc)}" data-line="${n.line}"`
+                        : '';
                     
                     group += `
                         <li class="result-item ${isLocal ? 'local' : ''}" 
                             onclick="searchWord(${labelArg})"
-                            title="${escHtml(tooltip)}">
+                            title="${escHtml(tooltip)}"
+                            ${dataAttrs}>
                             <span class="result-word">${labelText}</span>
                             <span class="result-weight">${weight}${locInfo ? ' • ' + escHtml(locInfo) : ''}</span>
                             ${badge}
@@ -864,6 +867,83 @@ HTML_PAGE = '''<!DOCTYPE html>
             
             html += '</div>';
             content.innerHTML = html;
+            
+            // Add hover handlers for lazy context loading
+            document.querySelectorAll('.result-item.local').forEach(item => {
+                item.addEventListener('mouseenter', async (e) => {
+                    const doc = item.dataset.doc;
+                    const line = item.dataset.line;
+                    if (doc && line) {
+                        await showContext(item, doc, line);
+                    }
+                });
+            });
+        }
+        
+        let contextCache = {};
+        let contextTooltip = null;
+        
+        async function showContext(element, doc, line) {
+            const key = doc + ':' + line;
+            
+            // Check cache
+            if (!contextCache[key]) {
+                try {
+                    const url = '/api/context?doc=' + encodeURIComponent(doc) + '&line=' + encodeURIComponent(line);
+                    const res = await fetch(url);
+                    const data = await res.json();
+                    if (data.content) {
+                        contextCache[key] = data;
+                    } else if (data.error) {
+                        contextCache[key] = { content: 'Error: ' + data.error };
+                    }
+                } catch (e) {
+                    contextCache[key] = { content: 'Could not load context' };
+                }
+            }
+            
+            const ctx = contextCache[key];
+            if (!ctx || !ctx.content) return;
+            
+            // Create or update tooltip
+            if (!contextTooltip) {
+                contextTooltip = document.createElement('div');
+                contextTooltip.className = 'context-tooltip';
+                contextTooltip.style.cssText = `
+                    position: fixed;
+                    background: #161b22;
+                    border: 1px solid #30363d;
+                    border-radius: 8px;
+                    padding: 12px 16px;
+                    max-width: 500px;
+                    max-height: 200px;
+                    overflow: auto;
+                    font-family: monospace;
+                    font-size: 12px;
+                    color: #e6edf3;
+                    white-space: pre-wrap;
+                    word-break: break-word;
+                    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+                    z-index: 9999;
+                    pointer-events: none;
+                `;
+                document.body.appendChild(contextTooltip);
+            }
+            
+            // Position tooltip
+            const rect = element.getBoundingClientRect();
+            contextTooltip.style.left = (rect.left + 20) + 'px';
+            contextTooltip.style.top = (rect.bottom + 8) + 'px';
+            
+            // Show content with header
+            const header = '📄 ' + doc + ':' + (ctx.block_start || line) + '-' + (ctx.block_end || line) + '\n\n';
+            contextTooltip.textContent = header + ctx.content;
+            contextTooltip.style.display = 'block';
+            
+            // Hide on mouse leave
+            element.addEventListener('mouseleave', () => {
+                if (contextTooltip) contextTooltip.style.display = 'none';
+            }, { once: true });
         }
         
         function searchWord(word) {
@@ -1002,6 +1082,8 @@ class UIHandler(BaseHTTPRequestHandler):
             self.api_status()
         elif parsed.path == '/api/verify':
             self.api_verify(parsed.query)
+        elif parsed.path == '/api/context':
+            self.api_context(parsed.query)
         else:
             self.send_error(404)
     
@@ -3034,6 +3116,121 @@ class UIHandler(BaseHTTPRequestHandler):
             })
         except Exception as e:
             self.send_json({'error': str(e)}, 500)
+    
+    def api_context(self, query_string: str):
+        """
+        Lazy load context from source file (MDL-compliant).
+        
+        Theory: Don't store snippets - read file on demand.
+        Returns semantic block around the given line.
+        
+        Query params:
+            doc: document filename
+            line: line number (1-indexed)
+        """
+        params = urllib.parse.parse_qs(query_string or "")
+        doc = (params.get('doc', [''])[0] or '').strip()
+        line_str = (params.get('line', [''])[0] or '').strip()
+        
+        if not doc or not line_str:
+            self.send_json({'error': 'Missing doc or line parameter'}, 400)
+            return
+        
+        try:
+            target_line = int(line_str)
+        except ValueError:
+            self.send_json({'error': 'Invalid line number'}, 400)
+            return
+        
+        # Find the document file
+        # Look in common locations relative to working directory
+        doc_path = None
+        candidates = [
+            Path(doc),
+            Path('.') / doc,
+            Path('.invariant') / doc,
+            Path('docs') / doc,
+        ]
+        
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_file():
+                doc_path = candidate
+                break
+        
+        if not doc_path:
+            self.send_json({
+                'error': f'Document not found: {doc}',
+                'searched': [str(c) for c in candidates]
+            }, 404)
+            return
+        
+        try:
+            text = doc_path.read_text(encoding='utf-8')
+            lines = text.split('\n')
+            
+            if target_line < 1 or target_line > len(lines):
+                self.send_json({'error': f'Line {target_line} out of range (1-{len(lines)})'}, 400)
+                return
+            
+            # Extract semantic block using phase boundary detection
+            block_start, block_end, block_lines = self._extract_semantic_block(lines, target_line)
+            
+            self.send_json({
+                'doc': doc,
+                'doc_path': str(doc_path.absolute()),
+                'line': target_line,
+                'block_start': block_start,
+                'block_end': block_end,
+                'content': '\n'.join(block_lines),
+                'lines': block_lines,
+                'total_lines': len(lines)
+            })
+            
+        except Exception as e:
+            self.send_json({'error': str(e)}, 500)
+    
+    def _extract_semantic_block(self, lines: list, target_line: int, max_lines: int = 10):
+        """
+        Extract semantic block around target line.
+        
+        Uses phase boundary detection:
+        - Empty lines = paragraph boundary
+        - Lines starting with # = section boundary
+        - Lines with only whitespace = boundary
+        
+        Returns: (start_line, end_line, block_lines)
+        """
+        n = len(lines)
+        target_idx = target_line - 1  # 0-indexed
+        
+        def is_boundary(line: str) -> bool:
+            stripped = line.strip()
+            if not stripped:  # Empty line
+                return True
+            if stripped.startswith('#'):  # Markdown header
+                return True
+            if stripped.startswith('---'):  # Horizontal rule
+                return True
+            return False
+        
+        # Find block start (go up until boundary)
+        start_idx = target_idx
+        while start_idx > 0 and (target_idx - start_idx) < max_lines // 2:
+            if is_boundary(lines[start_idx - 1]):
+                break
+            start_idx -= 1
+        
+        # Find block end (go down until boundary)
+        end_idx = target_idx
+        while end_idx < n - 1 and (end_idx - target_idx) < max_lines // 2:
+            if is_boundary(lines[end_idx + 1]):
+                break
+            end_idx += 1
+        
+        # Extract block
+        block_lines = lines[start_idx:end_idx + 1]
+        
+        return start_idx + 1, end_idx + 1, block_lines  # Return 1-indexed
 
 
 class ReuseHTTPServer(HTTPServer):
