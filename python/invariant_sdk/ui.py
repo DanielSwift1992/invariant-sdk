@@ -953,6 +953,7 @@ class UIHandler(BaseHTTPRequestHandler):
     <meta charset="UTF-8">
     <title>3D Graph — Invariant</title>
     <script src="https://unpkg.com/3d-force-graph@1"></script>
+    <script src="https://unpkg.com/three-spritetext"></script>
     <style>
         * {{ margin: 0; padding: 0; }}
         body {{ 
@@ -1007,19 +1008,17 @@ class UIHandler(BaseHTTPRequestHandler):
         </div>
         
         <div class="legend">
-            <span><div class="dot" style="background:#58a6ff"></div> Large = High Mass (anchor)</span>
-        </div>
-        <div class="legend">
-            <span><div class="dot" style="background:#484f58"></div> Small = Low Mass (common)</span>
+            <span style="font-size:10px">Text Size = Mass = 1/log(2+degree)</span>
         </div>
         
         <p style="margin-top: 12px;">
             <a href="/graph">2D View</a> | <a href="/">Search</a>
         </p>
         
-        <div class="stats">
-            💡 Size = Information Content (Mass)<br>
-            📐 Position = Semantic Similarity
+        <div class="stats" style="font-family:monospace; font-size:10px;">
+            Edges: invisible (forces only)<br>
+            Position: emerges from balance<br>
+            Click word → search
         </div>
     </div>
     
@@ -1061,40 +1060,41 @@ class UIHandler(BaseHTTPRequestHandler):
                         value: e.weight
                     }}))
                 }})
-                // SIZE: Mass determines size (bigger = more information)
-                .nodeVal(n => {{
-                    const baseSize = n.phase === 'solid' ? 8 : 2;
-                    return baseSize + (n.mass * 15);
-                }})
-                // COLOR: Phase + degree for cluster hint
-                .nodeColor(n => {{
-                    if (n.phase === 'solid') {{
-                        // Anchors: blue intensity by degree
-                        const intensity = Math.min(255, 100 + n.degree * 10);
-                        return `rgb(${{50}}, ${{intensity}}, 255)`;
-                    }} else {{
-                        // Gas: gray, dimmer
-                        return '#484f58';
-                    }}
-                }})
-                .nodeOpacity(n => n.phase === 'solid' ? 1 : 0.6)
-                // LABELS: Only for solid nodes (anchors)
+                // ═══════════════════════════════════════════════════════
+                // MINIMAL INVARIANT VISUALIZATION
+                // Only necessary transformations: hash→ID, mass→size, weight→force
+                // ═══════════════════════════════════════════════════════
+                
+                // Disable default rendering
+                .nodeVal(0)
+                .nodeColor('transparent')
+                
+                // TEXT ONLY: Size = Mass (directly from physics)
                 .nodeThreeObject(n => {{
-                    if (!showLabels || n.phase !== 'solid') return null;
-                    
                     const sprite = new SpriteText(n.label);
+                    // Size = mass × constant (pure formula)
+                    sprite.textHeight = 2 + n.mass * 20;
                     sprite.color = '#e6edf3';
-                    sprite.textHeight = 3 + n.mass * 5;
-                    sprite.backgroundColor = 'rgba(13, 17, 23, 0.8)';
-                    sprite.padding = 1;
-                    sprite.borderRadius = 2;
+                    sprite.backgroundColor = false;
                     return sprite;
                 }})
-                .nodeThreeObjectExtend(true)
-                // LINKS
-                .linkWidth(l => 0.5 + l.value * 1.5)
-                .linkOpacity(0.3)
-                .linkColor(() => '#30363d')
+                .nodeThreeObjectExtend(false)  // Replace, don't extend
+                
+                // EDGES: Invisible (forces only, no representation)
+                .linkOpacity(0)
+                .linkWidth(0)
+                
+                // ═══════════════════════════════════════
+                // PURE PHYSICS FROM INVARIANTS.md
+                // No artificial concepts - let forces flow
+                // ═══════════════════════════════════════
+                
+                // LINKS: Edge weight = spring strength
+                // Stronger connection → closer together
+                .linkWidth(l => l.value * 3)
+                .linkOpacity(l => 0.2 + l.value * 0.5)
+                .linkColor(() => 'rgba(88, 166, 255, 0.6)')
+                
                 // INTERACTION
                 .onNodeClick(n => {{
                     window.location.href = '/?q=' + encodeURIComponent(n.label);
@@ -1102,15 +1102,33 @@ class UIHandler(BaseHTTPRequestHandler):
                 .onNodeHover(n => {{
                     container.style.cursor = n ? 'pointer' : 'default';
                 }})
-                // PHYSICS: Mass affects repulsion (information spreads)
-                .d3Force('charge', d3.forceManyBody().strength(n => {{
-                    return n.phase === 'solid' ? -n.mass * 300 : -50;
-                }}))
-                .d3Force('link', d3.forceLink().distance(60).strength(l => l.value * 0.4));
+                
+                // PHYSICS FORCES (pure from theory):
+                // 
+                // 1. REPULSION: F_repel ∝ mass
+                //    Heavier nodes (more information) push outward more
+                //
+                // 2. ATTRACTION: F_attract ∝ edge_weight  
+                //    Stronger connections pull together
+                //
+                // 3. CLUSTERING: Emerges naturally from force balance
+                //    No artificial clustering algorithm!
+                
+                .d3Force('charge', d3.forceManyBody()
+                    .strength(n => -n.mass * 500)  // Mass = repulsion
+                    .distanceMax(400)
+                )
+                .d3Force('link', d3.forceLink()
+                    .distance(l => 100 - l.value * 80)  // Strong links = shorter distance
+                    .strength(l => l.value)             // Weight = spring strength
+                )
+                .d3Force('center', d3.forceCenter())
+                .warmupTicks(100)
+                .cooldownTime(3000);
             
             // Auto-rotate
             Graph.controls().autoRotate = autoRotate;
-            Graph.controls().autoRotateSpeed = 0.3;
+            Graph.controls().autoRotateSpeed = 0.2;
         }}
         
         function toggleAnchorsOnly() {{
@@ -1145,7 +1163,6 @@ class UIHandler(BaseHTTPRequestHandler):
             Graph.cameraPosition({{ x: 0, y: 0, z: 500 }}, {{ x: 0, y: 0, z: 0 }}, 1000);
         }}
     </script>
-    <script src="https://unpkg.com/three-spritetext"></script>
 </body>
 </html>'''
         self.send_html(graph3d_html)
