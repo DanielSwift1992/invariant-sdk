@@ -21,6 +21,32 @@ from .halo import HaloClient
 
 
 @dataclass
+class VerificationResult:
+    """
+    Result of σ-proof verification.
+    
+    An assertion is considered σ-proven if:
+      1. A path exists in the σ-overlay from subject to object
+      2. At least one edge has document provenance (doc field)
+    
+    Without σ-proof, the assertion is a hypothesis (η) and should be
+    treated with caution (e.g., blocked, flagged, or require confirmation).
+    """
+    
+    proven: bool  # True if σ-proof exists
+    path: List[Dict]  # Edges in the proof path (may be empty)
+    sources: List[str]  # Document sources (provenance)
+    conflicts: List[Dict]  # Conflicting edges if any
+    subject_hash: str  # Resolved subject hash8
+    object_hash: str  # Resolved object hash8
+    message: str  # Human-readable explanation
+    
+    def __repr__(self) -> str:
+        icon = "✓" if self.proven else "✗"
+        return f"VerificationResult({icon} proven={self.proven}, sources={len(self.sources)}, conflicts={len(self.conflicts)})"
+
+
+@dataclass
 class Concept:
     """
     Resolved semantic concept with L0 physics properties.
@@ -411,6 +437,142 @@ class HaloPhysics:
         """
         return a.subtract(b)
     
+    def verify(
+        self, 
+        subject: str, 
+        object: str,
+        predicate: str = None,
+    ) -> VerificationResult:
+        """
+        Verify if an assertion has σ-proof (documentary evidence).
+        
+        This is the core B2B Guardrails function:
+          - LLM says something (η = hypothesis)
+          - We check if local documents (σ) support it
+          - If no σ-path → assertion is unverified
+        
+        σ-proof requires:
+          1. Path exists in σ-overlay from subject to object
+          2. At least one edge has document provenance
+        
+        Note: Global crystal (α) is NOT used for proof.
+        α provides context/associations, σ provides truth.
+        
+        Args:
+            subject: Subject of assertion (e.g., "contract", "Elon Musk")
+            object: Object of assertion (e.g., "3 years", "Apple")
+            predicate: Optional predicate (currently unused, for future use)
+        
+        Returns:
+            VerificationResult with proven status, path, sources, and conflicts
+        
+        Example:
+            result = client.verify("contract", "3 years")
+            if not result.proven:
+                return "No documentary evidence for this claim"
+        """
+        from .halo import hash8_hex
+        
+        # Require overlay for verification
+        if not self._overlay:
+            return VerificationResult(
+                proven=False,
+                path=[],
+                sources=[],
+                conflicts=[],
+                subject_hash="",
+                object_hash="",
+                message="No overlay loaded. Cannot verify without σ-facts."
+            )
+        
+        # Resolve subject to hash8
+        subject_hash = None
+        for candidate in [f"Ġ{subject.lower()}", subject.lower(), f"▁{subject.lower()}"]:
+            h8 = hash8_hex(candidate)
+            if any(e.tgt for e in self._overlay.edges.get(h8, [])):
+                subject_hash = h8
+                break
+        
+        if not subject_hash:
+            # Fallback: use Ġ-prefixed hash even if not in overlay
+            subject_hash = hash8_hex(f"Ġ{subject.lower()}")
+        
+        # Resolve object to hash8
+        object_hash = None
+        for candidate in [f"Ġ{object.lower()}", object.lower(), f"▁{object.lower()}"]:
+            h8 = hash8_hex(candidate)
+            # Check if this hash appears as target in any edge
+            for src, edges in self._overlay.edges.items():
+                if any(e.tgt == h8 for e in edges):
+                    object_hash = h8
+                    break
+            if object_hash:
+                break
+        
+        if not object_hash:
+            object_hash = hash8_hex(f"Ġ{object.lower()}")
+        
+        # Check for σ-path
+        proven, path_edges = self._overlay.has_sigma_path(subject_hash, object_hash)
+        
+        # Extract sources (document provenance)
+        sources = []
+        path_dicts = []
+        for edge in path_edges:
+            path_dicts.append(edge.to_dict())
+            if edge.doc and edge.doc not in sources:
+                sources.append(edge.doc)
+        
+        # Check for conflicts
+        conflicts = []
+        for edge1, edge2 in self._overlay.get_conflicts():
+            if edge1.tgt == object_hash or edge2.tgt == object_hash:
+                conflicts.append({
+                    "edge1": edge1.to_dict(),
+                    "edge2": edge2.to_dict(),
+                })
+        
+        # Build message
+        if proven:
+            if sources:
+                message = f"σ-proven with provenance from: {', '.join(sources)}"
+            else:
+                message = "σ-path exists but no document provenance (weak proof)"
+        else:
+            if self._overlay.n_edges == 0:
+                message = "Overlay is empty. Ingest documents first."
+            else:
+                message = f"No σ-path from '{subject}' to '{object}'. Assertion is unverified (η)."
+        
+        return VerificationResult(
+            proven=proven and len(sources) > 0,  # Require provenance for true proof
+            path=path_dicts,
+            sources=sources,
+            conflicts=conflicts,
+            subject_hash=subject_hash,
+            object_hash=object_hash,
+            message=message
+        )
+    
+    def get_conflicts(self) -> List[Dict]:
+        """
+        Get all σ-conflicts (same assertion with different values/sources).
+        
+        Useful for document analysis: "In contract A it says 3 years,
+        but in contract B it says 5 years."
+        """
+        if not self._overlay:
+            return []
+        
+        conflicts = []
+        for edge1, edge2 in self._overlay.get_conflicts():
+            conflicts.append({
+                "edge1": edge1.to_dict(),
+                "edge2": edge2.to_dict(),
+            })
+        return conflicts
+    
     def __repr__(self) -> str:
         overlay_info = f"+overlay({self._overlay.n_edges})" if self._overlay else ""
         return f"HaloPhysics({self.crystal_id}{overlay_info})"
+
