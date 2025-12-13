@@ -289,11 +289,14 @@ HTML_PAGE = '''<!DOCTYPE html>
         
         <div class="doc-section">
             <h3>ADD DOCUMENT</h3>
-            <div class="doc-upload" onclick="document.getElementById('fileInput').click()">
+            <div class="doc-upload" id="dropZone" onclick="document.getElementById('fileInput').click()"
+                 ondragover="event.preventDefault(); this.style.borderColor='#58a6ff'; this.style.background='#161b22'"
+                 ondragleave="this.style.borderColor='#30363d'; this.style.background=''"
+                 ondrop="event.preventDefault(); this.style.borderColor='#30363d'; this.style.background=''; handleDrop(event)">
                 <input type="file" id="fileInput" accept=".txt,.md" onchange="uploadFile(this)">
-                <p>Click to upload .txt or .md file</p>
+                <p>📄 Drag file here or click to upload</p>
                 <p style="font-size: 12px; color: #8b949e; margin-top: 8px;">
-                    Document will be processed and added to your local knowledge
+                    Supports .txt and .md files (up to 500 unique words will be indexed)
                 </p>
             </div>
         </div>
@@ -413,6 +416,14 @@ HTML_PAGE = '''<!DOCTYPE html>
             }
             
             input.value = '';
+        }
+        
+        function handleDrop(e) {
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                const fakeInput = { files: files };
+                uploadFile(fakeInput);
+            }
         }
     </script>
 </body>
@@ -593,7 +604,7 @@ class UIHandler(BaseHTTPRequestHandler):
             
             # Simple tokenization
             words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
-            unique_words = list(dict.fromkeys(words))[:100]
+            unique_words = list(dict.fromkeys(words))[:500]  # Process up to 500 unique words
             
             # Find anchors using single BATCH API call (O(1) network round-trip)
             # Server now properly supports limit=0 for meta-only checks
