@@ -642,6 +642,8 @@ class UIHandler(BaseHTTPRequestHandler):
         elif parsed.path == '/graph3d':
             self.serve_gravity3d_page()
         elif parsed.path == '/cloud':
+            self.serve_cloud2d_page()
+        elif parsed.path == '/cloud3d':
             self.serve_cloud_page()
         elif parsed.path == '/api/search':
             self.api_search(parsed.query)
@@ -991,7 +993,211 @@ class UIHandler(BaseHTTPRequestHandler):
         UIHandler._graph_cache_key = cache_key
         UIHandler._graph_cache_value = payload
         self.send_json(payload)
-    
+
+    def serve_cloud2d_page(self):
+        """Classic 2D tag cloud (text-only, physics-based)."""
+        cloud_html = '''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Tag Cloud — Invariant</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #0d1117;
+            color: #e6edf3;
+            overflow: hidden;
+        }
+        #cloud {
+            position: relative;
+            width: 100vw;
+            height: 100vh;
+        }
+        .word {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            transform: translate(-50%, -50%);
+            white-space: nowrap;
+            cursor: pointer;
+            user-select: none;
+            font-weight: 600;
+            text-shadow: 0 2px 12px rgba(0,0,0,0.85);
+            transition: transform 0.12s, opacity 0.12s;
+        }
+        .word:hover {
+            transform: translate(-50%, -50%) scale(1.35);
+            z-index: 1000;
+        }
+        .word.dim { opacity: 0.15; }
+        .word.anchor {
+            font-weight: 800;
+            text-shadow: 0 0 18px currentColor, 0 2px 12px rgba(0,0,0,0.85);
+        }
+        #hud {
+            position: fixed;
+            top: 16px;
+            left: 16px;
+            background: rgba(22, 27, 34, 0.95);
+            padding: 14px;
+            border-radius: 8px;
+            border: 1px solid #30363d;
+            width: 340px;
+            z-index: 2000;
+        }
+        #hud h1 {
+            font-size: 12px;
+            color: #58a6ff;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+            margin: 0 0 10px;
+        }
+        #hud .row { font-size: 12px; color: #8b949e; margin: 4px 0; }
+        #hud .row span { color: #e6edf3; }
+        #hud a { color: #58a6ff; }
+        #tooltip {
+            position: fixed;
+            background: rgba(22, 27, 34, 0.95);
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid #58a6ff;
+            font-size: 12px;
+            pointer-events: none;
+            opacity: 0;
+            transition: opacity 0.1s;
+            z-index: 3000;
+            max-width: 360px;
+        }
+        #tooltip.visible { opacity: 1; }
+        #tooltip .t { color: #58a6ff; font-weight: 700; margin-bottom: 6px; }
+        #tooltip .s { color: #8b949e; margin: 2px 0; }
+    </style>
+</head>
+<body>
+    <div id="hud">
+        <h1>Tag Cloud</h1>
+        <div class="row">Size: <span>Mass</span> = 1/log(2+degree_total)</div>
+        <div class="row">Color: <span>Temperature</span> ∝ log(2+degree_total)</div>
+        <div class="row">Hover: neighborhood highlight</div>
+        <div class="row" style="margin-top: 8px;"><a href="/">Search</a> | <a href="/graph">Graph</a> | <a href="/graph3d">3D</a> | <a href="/cloud3d">Cloud 3D (legacy)</a></div>
+    </div>
+    <div id="cloud"></div>
+    <div id="tooltip"></div>
+    <script>
+    (async function () {
+        const res = await fetch('/api/graph');
+        const data = await res.json();
+        const nodes = (data.nodes || []).map(n => ({...n}));
+        const links = (data.edges || []).map(e => ({ source: e.source, target: e.target, weight: +e.weight || 0 }));
+
+        const cloud = document.getElementById('cloud');
+        const tooltip = document.getElementById('tooltip');
+
+        if (!nodes.length) {
+            cloud.innerHTML = '<div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:#8b949e;">No local graph loaded</div>';
+            return;
+        }
+
+        const neigh = new Map(nodes.map(n => [n.id, new Set()]));
+        links.forEach(l => {
+            if (neigh.has(l.source)) neigh.get(l.source).add(l.target);
+            if (neigh.has(l.target)) neigh.get(l.target).add(l.source);
+        });
+
+        const degs = nodes.map(n => Math.max(0, +n.degree_total || +n.degree || 0));
+        const logDegs = degs.map(d => Math.log(2 + d));
+        const minLog = Math.min(...logDegs);
+        const maxLog = Math.max(...logDegs);
+        function normTemp(n) {
+            const d = Math.max(0, +n.degree_total || +n.degree || 0);
+            const v = Math.log(2 + d);
+            if (maxLog <= minLog) return 0;
+            return (v - minLog) / (maxLog - minLog);
+        }
+        const cold = [121, 192, 255]; // #79c0ff
+        const hot = [255, 123, 114]; // #ff7b72
+        function tempColor(t) {
+            t = Math.max(0, Math.min(1, t));
+            const r = Math.round(cold[0] + (hot[0] - cold[0]) * t);
+            const g = Math.round(cold[1] + (hot[1] - cold[1]) * t);
+            const b = Math.round(cold[2] + (hot[2] - cold[2]) * t);
+            return `rgb(${r},${g},${b})`;
+        }
+
+        const els = new Map();
+        nodes.forEach(n => {
+            const el = document.createElement('div');
+            el.className = 'word';
+            el.textContent = n.label || n.id.slice(0, 8);
+            if (n.phase === 'solid') el.classList.add('anchor');
+
+            const mass = Math.max(0, +n.mass || 0);
+            el.style.fontSize = (12 + mass * 40) + 'px';
+            el.style.color = tempColor(normTemp(n));
+
+            el.addEventListener('mousemove', (e) => {
+                tooltip.style.left = (e.clientX + 14) + 'px';
+                tooltip.style.top = (e.clientY + 14) + 'px';
+            });
+            el.addEventListener('mouseenter', () => {
+                const nb = neigh.get(n.id) || new Set();
+                els.forEach((otherEl, id) => {
+                    if (id === n.id || nb.has(id)) otherEl.classList.remove('dim');
+                    else otherEl.classList.add('dim');
+                });
+                tooltip.innerHTML = `
+                    <div class="t">${n.label}</div>
+                    <div class="s">mass: ${(n.mass || 0).toFixed(4)} | phase: ${n.phase}</div>
+                    <div class="s">degree_total: ${n.degree_total} | degree_local: ${n.degree}</div>
+                    <div class="s">temp: ${normTemp(n).toFixed(3)}</div>
+                `;
+                tooltip.classList.add('visible');
+            });
+            el.addEventListener('mouseleave', () => {
+                tooltip.classList.remove('visible');
+                els.forEach(otherEl => otherEl.classList.remove('dim'));
+            });
+            el.addEventListener('click', () => {
+                window.location.href = '/?q=' + encodeURIComponent(n.label || '');
+            });
+
+            cloud.appendChild(el);
+            els.set(n.id, el);
+        });
+
+        function layout() {
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+
+            const simulation = d3.forceSimulation(nodes)
+                .force('link', d3.forceLink(links).id(d => d.id)
+                    .distance(l => 120 + (1 - Math.max(0, Math.min(1, l.weight))) * 180)
+                    .strength(l => Math.max(0.05, Math.min(1, l.weight)))
+                )
+                .force('charge', d3.forceManyBody().strength(n => -30 - (Math.max(0, +n.mass || 0) * 220)))
+                .force('center', d3.forceCenter(0, 0))
+                .force('collide', d3.forceCollide(n => 10 + (Math.max(0, +n.mass || 0) * 20)).strength(0.7))
+                .alpha(1)
+                .alphaDecay(0.03);
+
+            simulation.on('tick', () => {
+                nodes.forEach(n => {
+                    const el = els.get(n.id);
+                    if (!el) return;
+                    el.style.transform = `translate(${(width/2 + n.x)}px, ${(height/2 + n.y)}px) translate(-50%, -50%)`;
+                });
+            });
+        }
+
+        layout();
+    })();
+    </script>
+</body>
+</html>'''
+        self.send_html(cloud_html)
+
     def serve_cloud_page(self):
         """3D rotatable tag cloud with CSS3D transforms."""
         cloud_html = f'''<!DOCTYPE html>
