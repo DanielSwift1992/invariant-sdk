@@ -93,6 +93,49 @@ HTML_PAGE = '''<!DOCTYPE html>
             color: #8b949e;
         }
 
+        .doc-picker {
+            margin-bottom: 18px;
+        }
+
+        .doc-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+            gap: 10px;
+            max-height: 240px;
+            overflow: auto;
+            padding-right: 6px;
+        }
+
+        .doc-item {
+            text-align: left;
+            padding: 10px 12px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 10px;
+            color: #e6edf3;
+            cursor: pointer;
+        }
+
+        .doc-item:hover { border-color: #58a6ff; }
+
+        .doc-item.active {
+            border-color: #58a6ff;
+            box-shadow: 0 0 0 1px rgba(88,166,255,0.25) inset;
+        }
+
+        .doc-item .name { font-weight: 600; font-size: 13px; }
+        .doc-item .meta { color: #8b949e; font-size: 11px; margin-top: 4px; }
+
+        .doc-empty {
+            grid-column: 1 / -1;
+            color: #8b949e;
+            font-size: 12px;
+            padding: 10px 12px;
+            border: 1px dashed #30363d;
+            border-radius: 10px;
+            background: #0d1117;
+        }
+
         .doc-select {
             padding: 10px 12px;
             font-size: 13px;
@@ -128,6 +171,24 @@ HTML_PAGE = '''<!DOCTYPE html>
             font-size: 12px;
             color: #8b949e;
         }
+
+        .graph-preview-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .mini-btn {
+            background: #21262d;
+            color: #e6edf3;
+            border: 1px solid #30363d;
+            padding: 4px 8px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 12px;
+        }
+
+        .mini-btn.active { border-color: #58a6ff; }
 
         .graph-preview-header a {
             color: #58a6ff;
@@ -435,13 +496,14 @@ HTML_PAGE = '''<!DOCTYPE html>
 	        
 	        <div class="toolbar">
 	            <div class="toolbar-left">
-	                <span class="toolbar-label">Document</span>
-	                <select id="docSelect" class="doc-select">
-	                    <option value="">All documents</option>
-	                </select>
+	                <span class="toolbar-label">Documents</span>
 	                <a id="docLink" class="doc-link" href="/doc">Open</a>
 	            </div>
 	        </div>
+
+            <div class="doc-picker">
+                <div id="docList" class="doc-list"></div>
+            </div>
 	        
 	        <div class="search-form">
 	            <div class="search-wrapper">
@@ -477,7 +539,7 @@ HTML_PAGE = '''<!DOCTYPE html>
     
 	    <div class="status-bar">
 	        <span>Crystal: <strong>$$CRYSTAL_ID$$</strong></span>
-	        <span><a href="/doc" style="color:#58a6ff">📄 Docs</a> | <a href="/cloud" style="color:#58a6ff">☁️ Cloud</a> | <a href="/graph" style="color:#58a6ff">📊 Graph</a> | <a href="/graph3d" style="color:#58a6ff">🧬 3D</a></span>
+	        <span><a href="/doc" style="color:#58a6ff">📄 Docs</a> | <a href="/graph3d" style="color:#58a6ff">🧬 3D</a></span>
 	        <span class="status-local">$$OVERLAY_STATUS$$</span>
 	    </div>
 
@@ -486,35 +548,85 @@ HTML_PAGE = '''<!DOCTYPE html>
 	        const searchBtn = document.getElementById('searchBtn');
 	        const content = document.getElementById('content');
 	        const autocomplete = document.getElementById('autocomplete');
-	        const docSelect = document.getElementById('docSelect');
+	        const docList = document.getElementById('docList');
 	        const docLink = document.getElementById('docLink');
 	        
 	        let selectedDoc = '';
+            let miniLabels = true;
 	        
 	        let debounceTimer;
 
+            function escHtml(s) {
+                return String(s)
+                    .replace(/&/g, '&amp;')
+                    .replace(/</g, '&lt;')
+                    .replace(/>/g, '&gt;')
+                    .replace(/"/g, '&quot;')
+                    .replace(/'/g, '&#39;');
+            }
+
+            function safeDecode(v) {
+                try { return decodeURIComponent(v); } catch (e) { return String(v || ''); }
+            }
+
 	        function setSelectedDoc(doc) {
 	            selectedDoc = (doc || '').trim();
-	            if (docSelect) docSelect.value = selectedDoc;
 	            try { localStorage.setItem('inv_doc', selectedDoc); } catch (e) {}
 	            if (docLink) {
 	                docLink.href = selectedDoc ? ('/doc?doc=' + encodeURIComponent(selectedDoc)) : '/doc';
 	            }
+                if (docList) {
+                    docList.querySelectorAll('.doc-item').forEach(el => {
+                        el.classList.toggle('active', safeDecode(el.dataset.doc || '') === selectedDoc);
+                    });
+                }
+                try {
+                    const url = new URL(window.location.href);
+                    if (selectedDoc) url.searchParams.set('doc', selectedDoc);
+                    else url.searchParams.delete('doc');
+                    history.replaceState({}, '', url.toString());
+                } catch (e) {}
 	        }
 
 	        async function loadDocs() {
 	            try {
 	                const res = await fetch('/api/docs');
 	                const data = await res.json();
-	                const docs = data.docs || [];
-	                let html = '<option value="">All documents</option>';
-	                docs.forEach(d => {
-	                    html += `<option value="${d.doc}">${d.doc} (${d.edges} edges)</option>`;
-	                });
-	                docSelect.innerHTML = html;
-	                if (selectedDoc) {
-	                    docSelect.value = selectedDoc;
-	                }
+	                const docs = (data.docs || []).slice();
+                    if (!docList) return;
+                    docs.sort((a, b) => (b.edges || 0) - (a.edges || 0) || String(a.doc).localeCompare(String(b.doc)));
+                    const totalEdges = docs.reduce((s, d) => s + (+d.edges || 0), 0);
+
+                    let html = '';
+                    html += `
+                        <button type="button" class="doc-item ${selectedDoc ? '' : 'active'}" data-doc="">
+                            <div class="name">All documents</div>
+                            <div class="meta">${docs.length} docs • ${totalEdges} edges</div>
+                        </button>
+                    `;
+
+                    if (docs.length === 0) {
+                        html += `<div class="doc-empty">No local documents yet — upload one below to build an overlay.</div>`;
+                        docList.innerHTML = html;
+                        setSelectedDoc(selectedDoc);
+                        return;
+                    }
+
+                    docs.forEach(d => {
+                        const name = String(d.doc || '');
+                        const key = encodeURIComponent(name);
+                        const edges = +d.edges || 0;
+                        const nodes = +d.nodes || 0;
+                        const active = name === selectedDoc ? ' active' : '';
+                        html += `
+                            <button type="button" class="doc-item${active}" data-doc="${key}">
+                                <div class="name">${escHtml(name)}</div>
+                                <div class="meta">${edges} edges • ${nodes} nodes</div>
+                            </button>
+                        `;
+                    });
+                    docList.innerHTML = html;
+                    setSelectedDoc(selectedDoc);
 	            } catch (e) {
 	                // ignore
 	            }
@@ -578,16 +690,54 @@ HTML_PAGE = '''<!DOCTYPE html>
 	            }
 	        });
 
-	        if (docSelect) {
-	            docSelect.addEventListener('change', () => {
-	                setSelectedDoc(docSelect.value);
-	                if (queryInput.value.trim()) search();
-	            });
-	        }
+            if (docList) {
+                docList.addEventListener('click', (e) => {
+                    const btn = e.target.closest('.doc-item');
+                    if (!btn) return;
+                    setSelectedDoc(safeDecode(btn.dataset.doc || ''));
+                    if (queryInput.value.trim()) search();
+                });
+            }
+
+            function setMiniLabels(on) {
+                miniLabels = !!on;
+                try { localStorage.setItem('inv_mini_labels', miniLabels ? '1' : '0'); } catch (e) {}
+                const btn = document.getElementById('miniLabelsBtn');
+                if (btn) btn.classList.toggle('active', miniLabels);
+            }
+
+            function toggleMiniLabels() {
+                setMiniLabels(!miniLabels);
+                const frame = document.getElementById('miniGraphFrame');
+                if (!frame || !frame.src) return;
+                try {
+                    const url = new URL(frame.src);
+                    url.searchParams.set('labels', miniLabels ? '1' : '0');
+                    frame.src = url.toString();
+                } catch (e) {
+                    // ignore
+                }
+                const full = document.getElementById('fullGraphLink');
+                if (full && full.href) {
+                    try {
+                        const url = new URL(full.href);
+                        url.searchParams.set('labels', miniLabels ? '1' : '0');
+                        full.href = url.toString();
+                    } catch (e) {}
+                }
+            }
         
 	        async function search() {
 	            const q = queryInput.value.trim();
 	            if (!q) return;
+
+                try {
+                    const url = new URL(window.location.href);
+                    url.searchParams.set('q', q);
+                    if (selectedDoc) url.searchParams.set('doc', selectedDoc);
+                    else url.searchParams.delete('doc');
+                    history.replaceState({}, '', url.toString());
+                } catch (e) {}
             
             searchBtn.disabled = true;
             content.innerHTML = '<div class="loading"><span class="spinner"></span>Searching...</div>';
@@ -601,13 +751,13 @@ HTML_PAGE = '''<!DOCTYPE html>
 	                const data = await res.json();
 	                
 	                if (data.error) {
-	                    content.innerHTML = '<div class="empty"><h3>Error</h3><p>' + data.error + '</p></div>';
+	                    content.innerHTML = '<div class="empty"><h3>Error</h3><p>' + escHtml(data.error) + '</p></div>';
 	                    return;
                 }
                 
                 renderResults(data);
             } catch (err) {
-                content.innerHTML = '<div class="empty"><h3>Connection Error</h3><p>' + err.message + '</p></div>';
+                content.innerHTML = '<div class="empty"><h3>Connection Error</h3><p>' + escHtml(err.message) + '</p></div>';
             } finally {
                 searchBtn.disabled = false;
             }
@@ -626,32 +776,38 @@ HTML_PAGE = '''<!DOCTYPE html>
 	            let miniSrc = '/graph3d?embed=1';
 	            if (selectedDoc) miniSrc += '&doc=' + encodeURIComponent(selectedDoc);
 	            if (focus) miniSrc += '&focus=' + encodeURIComponent(focus) + '&radius=1&max_nodes=180';
+                miniSrc += '&labels=' + (miniLabels ? '1' : '0');
 	            
 	            let fullHref = '/graph3d';
 	            const qs = [];
 	            if (selectedDoc) qs.push('doc=' + encodeURIComponent(selectedDoc));
 	            if (focus) qs.push('focus=' + encodeURIComponent(focus) + '&radius=2');
+                qs.push('labels=' + (miniLabels ? '1' : '0'));
 	            if (qs.length) fullHref += '?' + qs.join('&');
 	            
 	            let html = `
 	                <div class="results">
 	                    <div class="result-header">
 	                        <h2>
-	                            ${data.phase === 'solid' ? '◆' : '○'} "${data.query}"
+	                            ${data.phase === 'solid' ? '◆' : '○'} "${escHtml(data.query)}"
 	                            <span class="phase-badge ${data.phase}">${data.phase === 'solid' ? 'ANCHOR' : 'common'}</span>
 	                        </h2>
 	                        <div class="result-meta">
 	                            <span>Mode: ${data.mode}</span>
 	                            <span>Mass: ${(data.mass || 0).toFixed(2)}</span>
+                                <span>Doc: ${selectedDoc ? escHtml(selectedDoc) : 'all'}</span>
 	                            <span>${localCount} local, ${globalCount} global</span>
 	                        </div>
 	                    </div>
 	                    <div class="graph-preview">
 	                        <div class="graph-preview-header">
-	                            <span>3D molecule (local graph)</span>
-	                            <a href="${fullHref}" target="_blank">Open full</a>
+	                            <span>3D molecule (overlay: ${selectedDoc ? escHtml(selectedDoc) : 'all'})</span>
+                                <div class="graph-preview-actions">
+                                    <button class="mini-btn ${miniLabels ? 'active' : ''}" id="miniLabelsBtn" onclick="toggleMiniLabels()">Labels</button>
+	                                <a id="fullGraphLink" href="${fullHref}" target="_blank">Open full</a>
+                                </div>
 	                        </div>
-	                        <iframe class="graph-frame" src="${miniSrc}"></iframe>
+	                        <iframe id="miniGraphFrame" class="graph-frame" src="${miniSrc}"></iframe>
 	                    </div>
 	            `;
             
@@ -666,15 +822,17 @@ HTML_PAGE = '''<!DOCTYPE html>
                 items.slice(0, 15).forEach(n => {
                     const isLocal = n.source === 'local';
                     const label = n.label || 'unknown';
+                    const labelText = escHtml(label);
+                    const labelArg = JSON.stringify(label);
                     const weight = (n.weight * 100).toFixed(0) + '%';
                     const badge = isLocal 
                         ? '<span class="badge badge-local">LOCAL</span>'
                         : '<span class="badge badge-global">global</span>';
-                    const docInfo = n.doc ? ' • ' + n.doc : '';
+                    const docInfo = n.doc ? ' • ' + escHtml(n.doc) : '';
                     
                     group += `
-                        <li class="result-item ${isLocal ? 'local' : ''}" onclick="searchWord('${label}')">
-                            <span class="result-word">${label}</span>
+                        <li class="result-item ${isLocal ? 'local' : ''}" onclick="searchWord(${labelArg})">
+                            <span class="result-word">${labelText}</span>
                             <span class="result-weight">${weight}${docInfo}</span>
                             ${badge}
                         </li>
@@ -701,7 +859,7 @@ HTML_PAGE = '''<!DOCTYPE html>
             if (!input.files || !input.files[0]) return;
             
             const file = input.files[0];
-            content.innerHTML = '<div class="loading"><span class="spinner"></span>Processing ' + file.name + '...</div>';
+            content.innerHTML = '<div class="loading"><span class="spinner"></span>Processing ' + escHtml(file.name) + '...</div>';
             
             try {
                 const text = await file.text();
@@ -713,7 +871,7 @@ HTML_PAGE = '''<!DOCTYPE html>
                 const data = await res.json();
                 
 	                if (data.error) {
-	                    content.innerHTML = '<div class="empty"><h3>Error</h3><p>' + data.error + '</p></div>';
+	                    content.innerHTML = '<div class="empty"><h3>Error</h3><p>' + escHtml(data.error) + '</p></div>';
 	                } else {
 	                    try { await loadDocs(); } catch (e) {}
 	                    setSelectedDoc(file.name);
@@ -721,12 +879,12 @@ HTML_PAGE = '''<!DOCTYPE html>
 	                        <div class="empty">
 	                            <h3>✓ Document Added</h3>
 	                            <p>${data.anchors} concepts extracted, ${data.edges} connections created</p>
-	                            <p style="margin-top: 16px; color: #3fb950;">Selected: ${file.name}</p>
+	                            <p style="margin-top: 16px; color: #3fb950;">Selected: ${escHtml(file.name)}</p>
 	                        </div>
 	                    `;
 	                }
             } catch (err) {
-                content.innerHTML = '<div class="empty"><h3>Upload Error</h3><p>' + err.message + '</p></div>';
+                content.innerHTML = '<div class="empty"><h3>Upload Error</h3><p>' + escHtml(err.message) + '</p></div>';
             }
             
             input.value = '';
@@ -745,6 +903,10 @@ HTML_PAGE = '''<!DOCTYPE html>
 	            const docParam = (params.get('doc') || '').trim();
 	            let stored = '';
 	            try { stored = (localStorage.getItem('inv_doc') || '').trim(); } catch (e) {}
+
+                let storedLabels = '';
+                try { storedLabels = (localStorage.getItem('inv_mini_labels') || '').trim(); } catch (e) {}
+                setMiniLabels(storedLabels !== '0');
 	            
 	            setSelectedDoc(docParam || stored || '');
 	            await loadDocs();
@@ -2221,6 +2383,7 @@ class UIHandler(BaseHTTPRequestHandler):
     #hud button.active { border-color: #58a6ff; }
     #hud a { color: #58a6ff; text-decoration: none; }
     body.embed #hud { display: none; }
+    .graph-tooltip { display: none !important; }
   </style>
 </head>
 <body>
@@ -2309,7 +2472,7 @@ class UIHandler(BaseHTTPRequestHandler):
     const focusNode = focusId ? byId.get(focusId) : null;
     document.getElementById('focusName').textContent = focusNode ? focusNode.label : (focusParam || '—');
 
-    let showLabels = true;
+    let showLabels = params.get('labels') !== '0';
     let anchorsOnly = false;
     let hoveredId = null;
 
@@ -2325,7 +2488,9 @@ class UIHandler(BaseHTTPRequestHandler):
       .linkOpacity(embed ? 0.25 : 0.16)
       .linkColor(() => '#30363d')
       .onNodeHover(n => {
-        hoveredId = n ? n.id : null;
+        const nid = n ? n.id : null;
+        if (nid === hoveredId) return;
+        hoveredId = nid;
         document.getElementById('hoverName').textContent = n ? n.label : '—';
         scheduleLabels();
       })
@@ -2336,7 +2501,8 @@ class UIHandler(BaseHTTPRequestHandler):
         if (doc) url.searchParams.set('doc', doc);
         window.location.href = url.toString();
       })
-      .nodeLabel(n => `${n.label}\\nMass: ${(n.mass||0).toFixed(4)}\\nDegree_total: ${n.degree_total}`);
+      // Disable built-in hover tooltip (it can interfere with navigation); HUD + labels are enough.
+      .nodeLabel(() => '');
 
     // Physics mapping: weight affects distance/strength; mass affects charge (space).
     Graph.d3Force('link')
@@ -2347,9 +2513,46 @@ class UIHandler(BaseHTTPRequestHandler):
 
     const controls = Graph.controls();
     if (controls && controls.addEventListener) {
+      // Disable default zoom: we implement cursor-centered zoom ourselves.
+      try { controls.enableZoom = false; } catch (e) {}
       controls.addEventListener('change', () => scheduleLabels());
     }
     window.addEventListener('resize', () => scheduleLabels());
+
+    // Cursor-centered zoom (zoom towards mouse pointer, not scene center).
+    // This matches the UI expectation: wheel zoom should move into the point under the cursor.
+    graphEl.addEventListener('wheel', (e) => {
+      if (!controls || typeof Graph.screen2GraphCoords !== 'function') return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const rect = graphEl.getBoundingClientRect();
+      const sx = e.clientX - rect.left;
+      const sy = e.clientY - rect.top;
+
+      const cam = Graph.camera();
+      if (!cam) return;
+
+      const target = controls.target.clone();
+      const dist = cam.position.distanceTo(target);
+      if (!isFinite(dist) || dist <= 0) return;
+
+      // Exponential zoom feels natural across mouse wheels and trackpads.
+      const scale = Math.exp(e.deltaY * 0.0012);
+      const minDist = 18;
+      const maxDist = 8000;
+      const nextDist = Math.max(minDist, Math.min(maxDist, dist * scale));
+
+      // Approximate the world point under cursor at the current target depth.
+      const cursor = Graph.screen2GraphCoords(sx, sy, dist);
+      const dir = cam.position.clone().sub(cursor).normalize();
+      if (!isFinite(dir.length()) || dir.length() === 0) return;
+
+      cam.position.copy(cursor.clone().add(dir.multiplyScalar(nextDist)));
+      controls.target.copy(cursor);
+      controls.update();
+      scheduleLabels();
+    }, { passive: false });
 
     // HTML labels (caption near sphere)
     const labelEls = new Map();
@@ -2366,7 +2569,11 @@ class UIHandler(BaseHTTPRequestHandler):
       const n = byId.get(nid);
       if (!n) return false;
       if (anchorsOnly && !(n.mass > (data.mean_mass || 0.26))) return false;
-      if (embed) return true;
+      if (embed) {
+        if (hoveredId) return nid === hoveredId || adj.get(hoveredId)?.has(nid);
+        if (focusId) return nid === focusId || adj.get(focusId)?.has(nid);
+        return n.mass > (data.mean_mass || 0.26);
+      }
       if (hoveredId) return nid === hoveredId || adj.get(hoveredId)?.has(nid);
       if (focusId) return nid === focusId || adj.get(focusId)?.has(nid);
       return n.mass > (data.mean_mass || 0.26);
@@ -2428,6 +2635,7 @@ class UIHandler(BaseHTTPRequestHandler):
         url.searchParams.set('doc', doc);
         backLink.href = url.toString();
       }
+      btnLabels.classList.toggle('active', showLabels);
       btnLabels.onclick = () => {
         showLabels = !showLabels;
         btnLabels.classList.toggle('active', showLabels);
