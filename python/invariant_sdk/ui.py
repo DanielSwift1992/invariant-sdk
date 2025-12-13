@@ -826,8 +826,8 @@ HTML_PAGE = '''<!DOCTYPE html>
                     const labelArg = JSON.stringify(label);
                     const weight = (n.weight * 100).toFixed(0) + '%';
                     const badge = isLocal 
-                        ? '<span class="badge badge-local">LOCAL</span>'
-                        : '<span class="badge badge-global">global</span>';
+                        ? '<span class="badge badge-local" title="From local documents (σ-fact)">📄 σ</span>'
+                        : '<span class="badge badge-global" title="From global crystal (α-context)">🌐 α</span>';
                     const docInfo = n.doc ? ' • ' + escHtml(n.doc) : '';
                     
                     group += `
@@ -984,6 +984,8 @@ class UIHandler(BaseHTTPRequestHandler):
             self.api_docs()
         elif parsed.path == '/api/status':
             self.api_status()
+        elif parsed.path == '/api/verify':
+            self.api_verify(parsed.query)
         else:
             self.send_error(404)
     
@@ -2961,6 +2963,52 @@ class UIHandler(BaseHTTPRequestHandler):
         
         out.sort(key=lambda x: (-x['edges'], x['doc'].lower()))
         self.send_json({'docs': out})
+    
+    def api_verify(self, query_string: str):
+        """Verify if an assertion has σ-proof (documentary evidence)."""
+        physics = UIHandler.physics
+        overlay = UIHandler.overlay
+        
+        params = urllib.parse.parse_qs(query_string or "")
+        subject = (params.get('subject', [''])[0] or '').strip()
+        obj = (params.get('object', [''])[0] or '').strip()
+        
+        if not subject or not obj:
+            self.send_json({'error': 'Missing subject or object parameter'}, 400)
+            return
+        
+        if not overlay:
+            self.send_json({
+                'proven': False,
+                'message': 'No overlay loaded. Ingest documents first.',
+                'subject': subject,
+                'object': obj,
+                'path': [],
+                'sources': [],
+                'conflicts': []
+            })
+            return
+        
+        if not physics:
+            self.send_json({'error': 'Physics engine not initialized'}, 500)
+            return
+        
+        try:
+            result = physics.verify(subject, obj)
+            
+            self.send_json({
+                'proven': result.proven,
+                'message': result.message,
+                'subject': subject,
+                'object': obj,
+                'subject_hash': result.subject_hash,
+                'object_hash': result.object_hash,
+                'path': result.path,
+                'sources': result.sources,
+                'conflicts': result.conflicts
+            })
+        except Exception as e:
+            self.send_json({'error': str(e)}, 500)
 
 
 class ReuseHTTPServer(HTTPServer):
