@@ -397,6 +397,7 @@ HTML_PAGE = '''<!DOCTYPE html>
     
     <div class="status-bar">
         <span>Crystal: <strong>$$CRYSTAL_ID$$</strong></span>
+        <span><a href="/graph" style="color:#58a6ff">📊 View Graph</a></span>
         <span class="status-local">$$OVERLAY_STATUS$$</span>
     </div>
 
@@ -633,10 +634,14 @@ class UIHandler(BaseHTTPRequestHandler):
         
         if parsed.path in ('/', '/index.html'):
             self.serve_page()
+        elif parsed.path == '/graph':
+            self.serve_graph_page()
         elif parsed.path == '/api/search':
             self.api_search(parsed.query)
         elif parsed.path == '/api/suggest':
             self.api_suggest(parsed.query)
+        elif parsed.path == '/api/graph':
+            self.api_graph()
         elif parsed.path == '/api/status':
             self.api_status()
         else:
@@ -659,6 +664,280 @@ class UIHandler(BaseHTTPRequestHandler):
         page = page.replace('$$OVERLAY_STATUS$$', overlay_status)
         
         self.send_html(page)
+    
+    def serve_graph_page(self):
+        """Serve full graph visualization page with D3.js."""
+        overlay = UIHandler.overlay
+        physics = UIHandler.physics
+        
+        node_count = len(overlay.labels) if overlay else 0
+        edge_count = overlay.n_edges if overlay else 0
+        
+        graph_html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Graph — Invariant</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+        body {{ 
+            font-family: -apple-system, sans-serif; 
+            background: #0d1117; 
+            color: #e6edf3;
+            overflow: hidden;
+        }}
+        #graph {{ width: 100vw; height: 100vh; }}
+        .node {{ cursor: pointer; }}
+        .node:hover {{ stroke: #58a6ff; stroke-width: 3px; }}
+        .link {{ stroke: #30363d; }}
+        .label {{ font-size: 10px; fill: #8b949e; pointer-events: none; }}
+        #info {{
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(22, 27, 34, 0.95);
+            padding: 16px;
+            border-radius: 8px;
+            border: 1px solid #30363d;
+            max-width: 300px;
+            z-index: 100;
+        }}
+        #info h2 {{ color: #58a6ff; margin-bottom: 12px; }}
+        #info p {{ font-size: 13px; color: #8b949e; margin: 4px 0; }}
+        #controls {{
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: rgba(22, 27, 34, 0.95);
+            padding: 12px;
+            border-radius: 8px;
+            border: 1px solid #30363d;
+            z-index: 100;
+        }}
+        #controls button {{
+            padding: 8px 12px;
+            margin: 4px;
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: #e6edf3;
+            border-radius: 4px;
+            cursor: pointer;
+        }}
+        #controls button:hover {{ background: #30363d; }}
+        #tooltip {{
+            position: fixed;
+            background: #161b22;
+            border: 1px solid #30363d;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            pointer-events: none;
+            display: none;
+            z-index: 200;
+        }}
+        .legend {{
+            display: flex;
+            gap: 16px;
+            margin-top: 12px;
+        }}
+        .legend-item {{ display: flex; align-items: center; gap: 6px; font-size: 12px; }}
+        .legend-circle {{ width: 12px; height: 12px; border-radius: 50%; }}
+    </style>
+</head>
+<body>
+    <div id="info">
+        <h2>◆ Knowledge Graph</h2>
+        <p>Nodes: <strong id="nodeCount">{node_count}</strong></p>
+        <p>Edges: <strong id="edgeCount">{edge_count}</strong></p>
+        <p style="margin-top: 8px; font-size: 11px; color: #484f58;">
+            Size = Mass (information)<br>
+            Color = Phase (blue=anchor, gray=common)
+        </p>
+        <div class="legend">
+            <div class="legend-item"><div class="legend-circle" style="background:#58a6ff"></div> Solid</div>
+            <div class="legend-item"><div class="legend-circle" style="background:#484f58"></div> Gas</div>
+        </div>
+        <p style="margin-top: 12px;"><a href="/" style="color:#58a6ff">← Back to Search</a></p>
+    </div>
+    
+    <div id="controls">
+        <button onclick="zoomIn()">+ Zoom</button>
+        <button onclick="zoomOut()">− Zoom</button>
+        <button onclick="resetZoom()">Reset</button>
+        <button onclick="toggleLabels()">Labels</button>
+    </div>
+    
+    <div id="tooltip"></div>
+    <svg id="graph"></svg>
+    
+    <script>
+        let showLabels = true;
+        let simulation, svg, g, link, node, label;
+        let zoom;
+        
+        async function loadGraph() {{
+            const res = await fetch('/api/graph');
+            const data = await res.json();
+            
+            document.getElementById('nodeCount').textContent = data.nodes.length;
+            document.getElementById('edgeCount').textContent = data.edges.length;
+            
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+            
+            svg = d3.select('#graph')
+                .attr('width', width)
+                .attr('height', height);
+            
+            zoom = d3.zoom()
+                .scaleExtent([0.1, 10])
+                .on('zoom', (e) => g.attr('transform', e.transform));
+            
+            svg.call(zoom);
+            
+            g = svg.append('g');
+            
+            // Force simulation with physics
+            simulation = d3.forceSimulation(data.nodes)
+                .force('link', d3.forceLink(data.edges).id(d => d.id).distance(80).strength(d => d.weight * 0.5))
+                .force('charge', d3.forceManyBody().strength(d => -d.mass * 300))
+                .force('center', d3.forceCenter(width / 2, height / 2))
+                .force('collide', d3.forceCollide().radius(d => Math.sqrt(d.mass) * 25 + 5));
+            
+            // Edges
+            link = g.append('g')
+                .selectAll('line')
+                .data(data.edges)
+                .join('line')
+                .attr('class', 'link')
+                .attr('stroke-opacity', d => 0.2 + d.weight * 0.6)
+                .attr('stroke-width', d => 1 + d.weight * 2);
+            
+            // Nodes
+            node = g.append('g')
+                .selectAll('circle')
+                .data(data.nodes)
+                .join('circle')
+                .attr('class', 'node')
+                .attr('r', d => Math.sqrt(d.mass) * 20 + 5)
+                .attr('fill', d => d.phase === 'solid' ? '#58a6ff' : '#484f58')
+                .call(drag(simulation))
+                .on('click', (e, d) => {{
+                    window.location.href = '/?q=' + encodeURIComponent(d.label);
+                }})
+                .on('mouseover', (e, d) => {{
+                    const tooltip = document.getElementById('tooltip');
+                    tooltip.innerHTML = `<strong>${{d.label}}</strong><br>Mass: ${{d.mass.toFixed(3)}}<br>Phase: ${{d.phase}}<br>Degree: ${{d.degree}}`;
+                    tooltip.style.display = 'block';
+                    tooltip.style.left = (e.pageX + 10) + 'px';
+                    tooltip.style.top = (e.pageY + 10) + 'px';
+                }})
+                .on('mouseout', () => {{
+                    document.getElementById('tooltip').style.display = 'none';
+                }});
+            
+            // Labels
+            label = g.append('g')
+                .selectAll('text')
+                .data(data.nodes)
+                .join('text')
+                .attr('class', 'label')
+                .text(d => d.label)
+                .attr('dx', d => Math.sqrt(d.mass) * 20 + 8)
+                .attr('dy', 4);
+            
+            simulation.on('tick', () => {{
+                link
+                    .attr('x1', d => d.source.x)
+                    .attr('y1', d => d.source.y)
+                    .attr('x2', d => d.target.x)
+                    .attr('y2', d => d.target.y);
+                
+                node
+                    .attr('cx', d => d.x)
+                    .attr('cy', d => d.y);
+                
+                label
+                    .attr('x', d => d.x)
+                    .attr('y', d => d.y);
+            }});
+        }}
+        
+        function drag(simulation) {{
+            return d3.drag()
+                .on('start', (e, d) => {{
+                    if (!e.active) simulation.alphaTarget(0.3).restart();
+                    d.fx = d.x;
+                    d.fy = d.y;
+                }})
+                .on('drag', (e, d) => {{
+                    d.fx = e.x;
+                    d.fy = e.y;
+                }})
+                .on('end', (e, d) => {{
+                    if (!e.active) simulation.alphaTarget(0);
+                    d.fx = null;
+                    d.fy = null;
+                }});
+        }}
+        
+        function zoomIn() {{ svg.transition().call(zoom.scaleBy, 1.5); }}
+        function zoomOut() {{ svg.transition().call(zoom.scaleBy, 0.7); }}
+        function resetZoom() {{ svg.transition().call(zoom.transform, d3.zoomIdentity); }}
+        function toggleLabels() {{
+            showLabels = !showLabels;
+            label.style('display', showLabels ? 'block' : 'none');
+        }}
+        
+        loadGraph();
+    </script>
+</body>
+</html>'''
+        self.send_html(graph_html)
+    
+    def api_graph(self):
+        """Return graph data for D3.js visualization."""
+        import math
+        overlay = UIHandler.overlay
+        physics = UIHandler.physics
+        mean_mass = physics.mean_mass if physics else 0.26
+        
+        nodes = []
+        edges = []
+        node_set = set()
+        
+        if overlay:
+            # Collect all nodes
+            for h8, label in overlay.labels.items():
+                if label:
+                    # Calculate mass from degree
+                    degree = 0
+                    if h8 in overlay.edges:
+                        degree = len(overlay.edges[h8])
+                    mass = 1.0 / math.log(2 + degree) if degree > 0 else 0.3
+                    phase = 'solid' if mass > mean_mass else 'gas'
+                    
+                    nodes.append({
+                        'id': h8,
+                        'label': label,
+                        'mass': mass,
+                        'phase': phase,
+                        'degree': degree
+                    })
+                    node_set.add(h8)
+            
+            # Collect edges (only between known nodes)
+            for src, edge_list in overlay.edges.items():
+                for edge in edge_list:
+                    if src in node_set and edge.tgt in node_set:
+                        edges.append({
+                            'source': src,
+                            'target': edge.tgt,
+                            'weight': abs(edge.weight)
+                        })
+        
+        self.send_json({'nodes': nodes, 'edges': edges})
     
     def api_search(self, query_string: str):
         params = urllib.parse.parse_qs(query_string)
