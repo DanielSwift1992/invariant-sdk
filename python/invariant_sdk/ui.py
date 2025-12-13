@@ -108,6 +108,65 @@ HTML_PAGE = '''<!DOCTYPE html>
         .btn:hover { background: #2ea043; }
         .btn:disabled { background: #21262d; cursor: wait; }
         
+        /* Autocomplete styles */
+        .search-wrapper {
+            position: relative;
+            flex: 1;
+        }
+        
+        .autocomplete {
+            position: absolute;
+            top: 100%;
+            left: 0;
+            right: 0;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-top: none;
+            border-radius: 0 0 8px 8px;
+            max-height: 300px;
+            overflow-y: auto;
+            z-index: 100;
+            display: none;
+        }
+        
+        .autocomplete.show { display: block; }
+        
+        .autocomplete-item {
+            padding: 10px 18px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .autocomplete-item:hover {
+            background: #21262d;
+        }
+        
+        .autocomplete-item.local {
+            border-left: 3px solid #3fb950;
+        }
+        
+        .autocomplete-item.global {
+            border-left: 3px solid #58a6ff;
+        }
+        
+        .autocomplete-source {
+            font-size: 11px;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        
+        .autocomplete-source.local {
+            background: rgba(63, 185, 80, 0.2);
+            color: #3fb950;
+        }
+        
+        .autocomplete-source.global {
+            background: rgba(88, 166, 255, 0.2);
+            color: #58a6ff;
+        }
+        
         .btn-secondary {
             background: #21262d;
             border: 1px solid #30363d;
@@ -155,6 +214,36 @@ HTML_PAGE = '''<!DOCTYPE html>
         .result-meta {
             font-size: 13px;
             color: #8b949e;
+            display: flex;
+            gap: 16px;
+        }
+        
+        .phase-badge {
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 12px;
+            margin-left: 8px;
+            vertical-align: middle;
+        }
+        
+        .phase-badge.solid {
+            background: rgba(88, 166, 255, 0.2);
+            color: #58a6ff;
+        }
+        
+        .phase-badge.gas {
+            background: rgba(139, 148, 158, 0.2);
+            color: #8b949e;
+        }
+        
+        .orbit-group {
+            margin-top: 20px;
+        }
+        
+        .orbit-group h4 {
+            font-size: 14px;
+            margin-bottom: 10px;
+            font-weight: 500;
         }
         
         .result-list {
@@ -275,8 +364,12 @@ HTML_PAGE = '''<!DOCTYPE html>
         <p class="subtitle">Semantic Knowledge Explorer</p>
         
         <div class="search-form">
-            <input type="text" class="search-input" id="query" 
-                   placeholder="Type a word or concept..." autofocus>
+            <div class="search-wrapper">
+                <input type="text" class="search-input" id="query" 
+                       placeholder="Type to search... (suggestions will appear)" autofocus
+                       oninput="handleInput(this.value)" autocomplete="off">
+                <div class="autocomplete" id="autocomplete"></div>
+            </div>
             <button class="btn" id="searchBtn" onclick="search()">Search</button>
         </div>
         
@@ -311,9 +404,66 @@ HTML_PAGE = '''<!DOCTYPE html>
         const queryInput = document.getElementById('query');
         const searchBtn = document.getElementById('searchBtn');
         const content = document.getElementById('content');
+        const autocomplete = document.getElementById('autocomplete');
+        
+        let debounceTimer;
+        
+        function handleInput(value) {
+            clearTimeout(debounceTimer);
+            if (value.length < 2) {
+                autocomplete.classList.remove('show');
+                return;
+            }
+            debounceTimer = setTimeout(() => fetchSuggestions(value), 200);
+        }
+        
+        async function fetchSuggestions(q) {
+            try {
+                const res = await fetch('/api/suggest?q=' + encodeURIComponent(q));
+                const data = await res.json();
+                renderSuggestions(data.suggestions || []);
+            } catch (e) {
+                autocomplete.classList.remove('show');
+            }
+        }
+        
+        function renderSuggestions(suggestions) {
+            if (suggestions.length === 0) {
+                autocomplete.classList.remove('show');
+                return;
+            }
+            
+            let html = '';
+            suggestions.forEach(s => {
+                html += `
+                    <div class="autocomplete-item ${s.source}" onclick="selectSuggestion('${s.word}')">
+                        <span>${s.word}</span>
+                        <span class="autocomplete-source ${s.source}">${s.source}</span>
+                    </div>
+                `;
+            });
+            autocomplete.innerHTML = html;
+            autocomplete.classList.add('show');
+        }
+        
+        function selectSuggestion(word) {
+            queryInput.value = word;
+            autocomplete.classList.remove('show');
+            search();
+        }
+        
+        // Hide autocomplete on outside click
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.search-wrapper')) {
+                autocomplete.classList.remove('show');
+            }
+        });
         
         queryInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') search();
+            if (e.key === 'Enter') {
+                autocomplete.classList.remove('show');
+                search();
+            }
         });
         
         async function search() {
@@ -352,31 +502,52 @@ HTML_PAGE = '''<!DOCTYPE html>
             let html = `
                 <div class="results">
                     <div class="result-header">
-                        <h2>Connections for "${data.query}"</h2>
-                        <span class="result-meta">${localCount} local, ${globalCount} global</span>
+                        <h2>
+                            ${data.phase === 'solid' ? '◆' : '○'} "${data.query}"
+                            <span class="phase-badge ${data.phase}">${data.phase === 'solid' ? 'ANCHOR' : 'common'}</span>
+                        </h2>
+                        <div class="result-meta">
+                            <span>Mode: ${data.mode}</span>
+                            <span>Mass: ${(data.mass || 0).toFixed(2)}</span>
+                            <span>${localCount} local, ${globalCount} global</span>
+                        </div>
                     </div>
-                    <ul class="result-list">
             `;
             
-            data.neighbors.slice(0, 30).forEach(n => {
-                const isLocal = n.source === 'local';
-                const label = n.label || 'unknown';
-                const weight = (n.weight * 100).toFixed(0) + '%';
-                const badge = isLocal 
-                    ? '<span class="badge badge-local">LOCAL</span>'
-                    : '<span class="badge badge-global">global</span>';
-                const docInfo = n.doc ? ' • ' + n.doc : '';
-                
-                html += `
-                    <li class="result-item ${isLocal ? 'local' : ''}" onclick="searchWord('${label}')">
-                        <span class="result-word">${label}</span>
-                        <span class="result-weight">${weight}${docInfo}</span>
-                        ${badge}
-                    </li>
-                `;
-            });
+            // Group by orbit (physics from INVARIANTS.md)
+            const core = data.neighbors.filter(n => Math.abs(n.weight) >= 0.7);
+            const near = data.neighbors.filter(n => Math.abs(n.weight) >= 0.5 && Math.abs(n.weight) < 0.7);
+            const far = data.neighbors.filter(n => Math.abs(n.weight) < 0.5);
             
-            html += '</ul></div>';
+            const renderGroup = (items, title, color) => {
+                if (items.length === 0) return '';
+                let group = `<div class="orbit-group"><h4 style="color:${color}">${title} (${items.length})</h4><ul class="result-list">`;
+                items.slice(0, 15).forEach(n => {
+                    const isLocal = n.source === 'local';
+                    const label = n.label || 'unknown';
+                    const weight = (n.weight * 100).toFixed(0) + '%';
+                    const badge = isLocal 
+                        ? '<span class="badge badge-local">LOCAL</span>'
+                        : '<span class="badge badge-global">global</span>';
+                    const docInfo = n.doc ? ' • ' + n.doc : '';
+                    
+                    group += `
+                        <li class="result-item ${isLocal ? 'local' : ''}" onclick="searchWord('${label}')">
+                            <span class="result-word">${label}</span>
+                            <span class="result-weight">${weight}${docInfo}</span>
+                            ${badge}
+                        </li>
+                    `;
+                });
+                group += '</ul></div>';
+                return group;
+            };
+            
+            html += renderGroup(core, '◼ Core (synonyms, 70%+)', '#58a6ff');
+            html += renderGroup(near, '◻ Near (associations, 50-70%)', '#8b949e');
+            html += renderGroup(far, '○ Far (context, <50%)', '#484f58');
+            
+            html += '</div>';
             content.innerHTML = html;
         }
         
@@ -464,6 +635,8 @@ class UIHandler(BaseHTTPRequestHandler):
             self.serve_page()
         elif parsed.path == '/api/search':
             self.api_search(parsed.query)
+        elif parsed.path == '/api/suggest':
+            self.api_suggest(parsed.query)
         elif parsed.path == '/api/status':
             self.api_status()
         else:
@@ -579,6 +752,71 @@ class UIHandler(BaseHTTPRequestHandler):
             
         except Exception as e:
             self.send_json({'error': str(e)}, 500)
+    
+    def api_suggest(self, query_string: str):
+        """Autocomplete suggestions from local + global."""
+        params = urllib.parse.parse_qs(query_string)
+        q = params.get('q', [''])[0].strip().lower()
+        
+        if len(q) < 2:
+            self.send_json({'suggestions': []})
+            return
+        
+        physics = UIHandler.physics
+        overlay = UIHandler.overlay
+        suggestions = []
+        
+        # 1. Local words (from overlay labels) — highest priority
+        if overlay:
+            for h8, label in overlay.labels.items():
+                if label and label.lower().startswith(q):
+                    suggestions.append({
+                        'word': label,
+                        'source': 'local',
+                        'hash8': h8
+                    })
+        
+        # 2. Global suggestions via halo lookup
+        if physics and len(suggestions) < 10:
+            try:
+                # Try to resolve the prefix and get neighbors
+                h8 = hash8_hex(f"Ġ{q}")
+                result = physics._client.get_halo_page(h8, limit=20)
+                if result.get('exists') or result.get('neighbors'):
+                    # Add the word itself
+                    if not any(s['word'].lower() == q for s in suggestions):
+                        suggestions.append({
+                            'word': q,
+                            'source': 'global',
+                            'hash8': h8
+                        })
+                    # Add top neighbors as suggestions
+                    neighbor_hashes = [n['hash8'] for n in result.get('neighbors', [])[:10]]
+                    if neighbor_hashes:
+                        labels = physics._client.get_labels_batch(neighbor_hashes)
+                        for h8, label in labels.items():
+                            if label and label.lower().startswith(q[:2]):
+                                suggestions.append({
+                                    'word': label,
+                                    'source': 'global',
+                                    'hash8': h8
+                                })
+            except Exception:
+                pass
+        
+        # Dedupe and limit
+        seen = set()
+        unique = []
+        for s in suggestions:
+            key = s['word'].lower()
+            if key not in seen:
+                seen.add(key)
+                unique.append(s)
+        
+        # Sort: local first, then alphabetically
+        unique.sort(key=lambda x: (0 if x['source'] == 'local' else 1, x['word'].lower()))
+        
+        self.send_json({'suggestions': unique[:10]})
     
     def api_ingest(self):
         """Ingest document via POST."""
