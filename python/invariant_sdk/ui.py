@@ -1060,18 +1060,28 @@ class UIHandler(BaseHTTPRequestHandler):
     
     def api_context(self, query_string: str):
         """
-        Lazy load context from source file (MDL-compliant).
+        Lazy load context from source file with integrity verification.
         
-        Theory: Don't store snippets - read file on demand.
-        Returns semantic block around the given line.
+        Anchor Integrity Protocol (see INVARIANTS.md):
+        - Reads file on demand (MDL-compliant)
+        - Verifies ctx_hash if provided (drift detection)
+        - Attempts self-healing if hash not at expected line
         
         Query params:
             doc: document filename
             line: line number (1-indexed)
+            ctx_hash: optional semantic checksum for verification
+        
+        Returns:
+            status: 'fresh' | 'relocated' | 'broken' | 'unchecked'
         """
+        import hashlib
+        import re
+        
         params = urllib.parse.parse_qs(query_string or "")
         doc = (params.get('doc', [''])[0] or '').strip()
         line_str = (params.get('line', [''])[0] or '').strip()
+        ctx_hash = (params.get('ctx_hash', [''])[0] or '').strip()
         
         if not doc or not line_str:
             self.send_json({'error': 'Missing doc or line parameter'}, 400)
@@ -1084,7 +1094,6 @@ class UIHandler(BaseHTTPRequestHandler):
             return
         
         # Find the document file
-        # Look in common locations relative to working directory
         doc_path = None
         candidates = [
             Path(doc),
@@ -1101,7 +1110,8 @@ class UIHandler(BaseHTTPRequestHandler):
         if not doc_path:
             self.send_json({
                 'error': f'Document not found: {doc}',
-                'searched': [str(c) for c in candidates]
+                'searched': [str(c) for c in candidates],
+                'status': 'broken'
             }, 404)
             return
         
@@ -1110,16 +1120,63 @@ class UIHandler(BaseHTTPRequestHandler):
             lines = text.split('\n')
             
             if target_line < 1 or target_line > len(lines):
-                self.send_json({'error': f'Line {target_line} out of range (1-{len(lines)})'}, 400)
+                self.send_json({
+                    'error': f'Line {target_line} out of range (1-{len(lines)})',
+                    'status': 'broken'
+                }, 400)
                 return
             
-            # Extract semantic block using phase boundary detection
-            block_start, block_end, block_lines = self._extract_semantic_block(lines, target_line)
+            # Tokenize entire file for hash computation
+            tokens = self._tokenize_file(text)
+            
+            # Default status
+            status = 'unchecked'
+            actual_line = target_line
+            
+            # If ctx_hash provided, verify integrity
+            if ctx_hash:
+                # Get all hashes for tokens on target line
+                line_hashes = self._compute_hash_at_line(tokens, target_line)
+                
+                if ctx_hash in line_hashes:
+                    status = 'fresh'
+                else:
+                    # Hash doesn't match - try to find it nearby (self-healing)
+                    scan_radius = 50
+                    found_line = None
+                    
+                    for offset in range(1, scan_radius + 1):
+                        # Check above
+                        check_line = target_line - offset
+                        if check_line >= 1:
+                            hashes = self._compute_hash_at_line(tokens, check_line)
+                            if ctx_hash in hashes:
+                                found_line = check_line
+                                break
+                        
+                        # Check below
+                        check_line = target_line + offset
+                        if check_line <= len(lines):
+                            hashes = self._compute_hash_at_line(tokens, check_line)
+                            if ctx_hash in hashes:
+                                found_line = check_line
+                                break
+                    
+                    if found_line:
+                        status = 'relocated'
+                        actual_line = found_line
+                    else:
+                        status = 'broken'
+            
+            # Extract semantic block from actual_line
+            block_start, block_end, block_lines = self._extract_semantic_block(lines, actual_line)
             
             self.send_json({
                 'doc': doc,
                 'doc_path': str(doc_path.absolute()),
-                'line': target_line,
+                'requested_line': target_line,
+                'actual_line': actual_line,
+                'status': status,
                 'block_start': block_start,
                 'block_end': block_end,
                 'content': '\n'.join(block_lines),
@@ -1128,7 +1185,49 @@ class UIHandler(BaseHTTPRequestHandler):
             })
             
         except Exception as e:
-            self.send_json({'error': str(e)}, 500)
+            self.send_json({'error': str(e), 'status': 'broken'}, 500)
+    
+    def _tokenize_file(self, text: str) -> list:
+        """Tokenize text with position info for hash computation."""
+        import re
+        results = []
+        lines = text.split('\n')
+        
+        for line_num, line in enumerate(lines, 1):
+            for match in re.finditer(r'\b[a-zA-Z]{3,}\b', line):
+                word = match.group().lower()
+                results.append((word, line_num))
+        
+        return results
+    
+    def _compute_hash_at_line(self, tokens: list, target_line: int, k: int = 2) -> list:
+        """
+        Compute all possible ctx_hashes for tokens at given line.
+        
+        Returns list of hashes (one per token on that line).
+        This is needed because we don't know which token was the anchor.
+        """
+        import hashlib
+        
+        # Find all tokens on this line
+        line_tokens = [(i, t) for i, t in enumerate(tokens) if t[1] == target_line]
+        
+        if not line_tokens:
+            return []
+        
+        hashes = []
+        for anchor_idx, _ in line_tokens:
+            # Get window
+            start = max(0, anchor_idx - k)
+            end = min(len(tokens), anchor_idx + k + 1)
+            
+            window_words = [tokens[i][0] for i in range(start, end)]
+            normalized = ' '.join(w.lower() for w in window_words)
+            
+            h = hashlib.sha256(normalized.encode('utf-8')).hexdigest()[:8]
+            hashes.append(h)
+        
+        return hashes
     
     def _extract_semantic_block(self, lines: list, target_line: int, max_lines: int = 10):
         """

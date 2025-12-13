@@ -1,0 +1,7 @@
+{"op": "add", "src": "33d7ac8be8008ade", "tgt": "fae1fd683e76d801", "w": 1.0, "ring": "sigma", "doc": "test_final.txt", "line": 1, "ctx_hash": "f3a9c975"}
+{"op": "add", "src": "fae1fd683e76d801", "tgt": "73ea1dee32055bfb", "w": 1.0, "ring": "sigma", "doc": "test_final.txt", "line": 1, "ctx_hash": "de3c5fed"}
+{"op": "add", "src": "73ea1dee32055bfb", "tgt": "f95ee1a549181f80", "w": 1.0, "ring": "sigma", "doc": "test_final.txt", "line": 1, "ctx_hash": "a5577bf0"}
+{"op": "def", "node": "33d7ac8be8008ade", "label": "apple"}
+{"op": "def", "node": "fae1fd683e76d801", "label": "banana"}
+{"op": "def", "node": "73ea1dee32055bfb", "label": "fruits"}
+{"op": "def", "node": "f95ee1a549181f80", "label": "fruit"}
