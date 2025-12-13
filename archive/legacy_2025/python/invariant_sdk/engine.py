@@ -33,7 +33,7 @@ class InvariantEngine:
     """
 
     def __init__(self, data_dir: str = "./data", verbose: bool = False, 
-                 use_embeddings: bool = True):
+                 use_embeddings: bool = True, crystal_path: str = None):
         """
         Initialize the engine.
         
@@ -41,12 +41,15 @@ class InvariantEngine:
             data_dir: Directory for persistent storage (blocks.db, vectors.pkl, knowledge.tank)
             verbose: If True, print debug information
             use_embeddings: If False, skip sentence-transformers loading (fixes mutex issues)
+            crystal_path: Path to .tank file for topological search (optional)
         """
         self.data_dir = Path(data_dir)
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.verbose = verbose
         self.use_embeddings = use_embeddings
         self._embedder = None  # Lazy loaded
+        self._crystal = None   # Lazy loaded
+        self._crystal_path = Path(crystal_path) if crystal_path else None
         
         if verbose:
             logging.basicConfig(level=logging.DEBUG)
@@ -74,11 +77,24 @@ class InvariantEngine:
         if self._embedder is None:
             if not self.use_embeddings:
                 raise RuntimeError(
-                    "Embeddings disabled (use_embeddings=False). "
-                    "Cannot use vector search or crystallize."
+                    "Embeddings disabled. Initialize with use_embeddings=True "
+                    "or use SearchMode.MERKLE/CRYSTAL."
                 )
             self._embedder = get_embedder()
         return self._embedder
+    
+    @property
+    def crystal(self):
+        """Lazy-load crystal graph only when needed."""
+        if self._crystal is None:
+            if self._crystal_path is None:
+                raise RuntimeError(
+                    "Crystal graph not configured. Initialize with crystal_path= "
+                    "to use SearchMode.CRYSTAL."
+                )
+            from .crystal import load_crystal
+            self._crystal = load_crystal(self._crystal_path)
+        return self._crystal
         
     def ingest(
         self, 
@@ -207,7 +223,18 @@ class InvariantEngine:
     def resonate(self, signal: str, mode: SearchMode = SearchMode.BINOCULAR, top_k: int = 5) -> List[Block]:
         """
         Interference Pattern.
+        
+        Modes:
+        - VECTOR: semantic similarity via embeddings
+        - MERKLE: keyword overlap
+        - BINOCULAR: both combined
+        - CRYSTAL: pure topological search via crystal graph
         """
+        # CRYSTAL mode: pure topological search
+        if mode == SearchMode.CRYSTAL:
+            return self._resonate_crystal(signal, top_k)
+        
+        # Other modes require embeddings
         query_vec = self.embedder.encode(signal)
         results = []
         
@@ -219,7 +246,6 @@ class InvariantEngine:
             if not raw_block: continue
             
             # 2. Left Eye (Merkle/Particle)
-            # Simple keyword overlap as proxy for Merkle in Python prototype
             m_score = 0.0
             if mode in [SearchMode.MERKLE, SearchMode.BINOCULAR]:
                 signal_words = set(signal.lower().split())
@@ -234,11 +260,9 @@ class InvariantEngine:
             elif mode == SearchMode.MERKLE:
                 final_score = m_score
             elif mode == SearchMode.BINOCULAR:
-                # Geometric mean: signal multiplication (pure)
                 final_score = (v_score * m_score) ** 0.5
             
-            if final_score > 0.0:  # No empirical threshold - return all non-zero
-                # Convert to SDK Block type
+            if final_score > 0.0:
                 b = Block(
                     id=bid,
                     content=raw_block['content'],
@@ -248,6 +272,51 @@ class InvariantEngine:
                 )
                 results.append(b)
                 
+        results.sort(key=lambda x: x.score, reverse=True)
+        return results[:top_k]
+    
+    def _resonate_crystal(self, signal: str, top_k: int) -> List[Block]:
+        """
+        Pure topological search using crystal graph.
+        
+        1. Find related concepts in crystal graph
+        2. Match blocks that contain those concepts
+        """
+        # Get related words from crystal graph
+        related = self.crystal.get_related_words(signal, top_k=50)
+        
+        if not related:
+            return []
+        
+        # Build relevance set
+        relevance = {word.lower(): 1.0 - (i * 0.02) for i, word in enumerate(related)}
+        relevance[signal.lower()] = 1.0  # Original query has highest relevance
+        
+        # Score all blocks
+        results = []
+        for block in self.block_store.get_all():
+            content_words = set(block['content'].lower().split())
+            
+            # Calculate topological score
+            score = 0.0
+            matches = 0
+            for word in content_words:
+                if word in relevance:
+                    score += relevance[word]
+                    matches += 1
+            
+            if matches > 0:
+                # Normalize by matches and content length
+                score = score / max(len(content_words), 1)
+                b = Block(
+                    id=block['id'],
+                    content=block['content'],
+                    source=block['source'],
+                    embedding=None,
+                    score=score
+                )
+                results.append(b)
+        
         results.sort(key=lambda x: x.score, reverse=True)
         return results[:top_k]
 

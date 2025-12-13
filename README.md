@@ -1,121 +1,57 @@
-# Invariant SDK
+# Invariant SDK (Halo)
 
-**Deterministic Knowledge Engine** — Connect your data, not just store it.
+Halo-first client/runtime for Invariant OS v3:
+
+- Canonical Merkle hashing (Identity)
+- v3+ `.crystal` reader (BinaryCrystal + zero-start indexes)
+- `HaloClient` (Semantic DNS / Ghost edges)
 
 ## Install
 
 ```bash
-make install
+pip install -e invariant-sdk/python
 ```
-
-Prerequisites: Python 3.9+, Rust ([rustup.rs](https://rustup.rs))
 
 ## Quick Start
 
 ```python
-from invariant_sdk import InvariantEngine
-from invariant_sdk.tools import StructuralAgent
+from invariant_sdk import HaloClient
 
-engine = InvariantEngine("./data")
+halo = HaloClient("http://127.0.0.1:8080")
 
-# Provide your LLM function
-def my_llm(prompt: str) -> str:
-    # Your LLM API call here
-    return response
+# Resolve surface concept -> public atoms (hash8 addresses).
+atoms = halo.resolve_concept("pytorch")
 
-agent = StructuralAgent(engine, llm=my_llm)
+# Explicit operators (no hidden defaults):
+neighbors_or = halo.get_concept_halo("pytorch", mode="blend")               # OR / superposition
+neighbors_and = halo.get_concept_halo("python torch", mode="interference")  # AND / intersection
 ```
 
-### Digest Text (Streaming Protocol)
+Halos are cached permanently under `~/.invariant/halo/<crystal_id>/`.
+
+## Local Crystal (Optional)
 
 ```python
-text = """
-Module X depends on Library Y. 
-Library Y has a critical vulnerability.
-Therefore Module X is at risk.
-"""
+from invariant_sdk import load_crystal
 
-# LLM extracts structure via quotes
-# chunk_size: adjust for your LLM's context window (default 8000)
-blocks = agent.digest("security_report", text, chunk_size=4000)
-print(f"Created {blocks} blocks")
-
-# Run inference
-engine.evolve()
-
-# Search
-results = engine.resonate("vulnerabilities")
+crystal = load_crystal("output/qwen/qwen_full_v3.crystal")
 ```
 
-### How It Works
+Requires the companion files:
+- `output/qwen/qwen_full_v3.index`
+- `output/qwen/qwen_full_v3.vocab.idx`
 
-1. **Chunking**: Text split into ~8000 char chunks
-2. **LLM Analysis**: Identifies blocks using exact quotes
-3. **Validation**: Python verifies quote positions exist
-4. **Storage**: Blocks stored with logical edges
+## Sidecar v2 (Optional)
 
-### LLM Protocol
-
-LLM receives text and returns JSON:
-```json
-{
-  "blocks": [
-    {
-      "start_quote": "Module X depends",
-      "end_quote": "Library Y.",
-      "logic": "ORIGIN",
-      "concepts": [{"name": "Module_X", "type": "DEF"}]
-    },
-    {
-      "start_quote": "Library Y has",
-      "end_quote": "vulnerability.",
-      "logic": "IMP",
-      "concepts": [{"name": "vulnerability", "type": "DEF"}]
-    }
-  ]
-}
+```bash
+python crystal-miner/sidecar.py ingest --halo http://127.0.0.1:8080 my_private_docs/
+python crystal-miner/sidecar.py query --halo http://127.0.0.1:8080 "gpu requirements"
 ```
 
-## API
+## Notes
 
-| Method | Description |
-|--------|-------------|
-| `agent.digest(source, text)` | Stream text via LLM |
-| `engine.resonate(query, mode)` | Search (VECTOR/MERKLE/BINOCULAR) |
-| `engine.evolve()` | Run logical inference |
-| `engine.forget(source)` | Delete document |
-| `get_prompt()` | Operator prompt for AI agents |
-
-## Logic Relations
-
-| Relation | Meaning | Example |
-|----------|---------|---------|
-| `ORIGIN` | First block | Start of document |
-| `IMP` | A implies B | "therefore", "because" |
-| `NOT` | A contradicts B | "but", "however" |
-| `EQUALS` | A = B | "means", "is defined as" |
-| `GATE` | A conditions B | "if", "when" |
-
-## For AI Agents
-
-```python
-from invariant_sdk import get_prompt
-
-system_prompt = get_prompt()  # Full operator instructions
-```
-
-## Structure
-
-```
-invariant-sdk/
-├── kernel/              # Rust (crystallize, merkle)
-├── python/
-│   └── invariant_sdk/
-│       ├── engine.py           # Core engine
-│       ├── tools/agent.py      # StructuralAgent
-│       └── operator_prompt.md  # AI agent instructions
-└── Makefile
-```
+- Halo servers are read-only: no text, no inference — only `hash8 → neighbors`.
+- If you want privacy, batch decoys client-side; the protocol remains stateless.
 
 ## License
 

@@ -37,8 +37,9 @@ class Block:
 
 class SearchMode(Enum):
     """Search strategies."""
-    VECTOR = "vector"      # Semantic similarity
-    MERKLE = "merkle"      # Structural matching
-    BINOCULAR = "binocular"  # Both combined (default)
+    VECTOR = "vector"         # Semantic similarity (embeddings)
+    MERKLE = "merkle"         # Structural matching (keywords)
+    BINOCULAR = "binocular"   # Both combined (default)
+    CRYSTAL = "crystal"       # Pure topological (crystal graph)
 
 
