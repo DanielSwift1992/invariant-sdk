@@ -93,12 +93,16 @@ class UIHandler(BaseHTTPRequestHandler):
             self.api_verify(parsed.query)
         elif parsed.path == '/api/context':
             self.api_context(parsed.query)
+        elif parsed.path == '/api/open':
+            self.api_open(parsed.query)
         else:
             self.send_error(404)
     
     def do_POST(self):
         if self.path == '/api/ingest':
             self.api_ingest()
+        elif self.path == '/api/reindex':
+            self.api_reindex()
         else:
             self.send_error(404)
     
@@ -122,6 +126,25 @@ class UIHandler(BaseHTTPRequestHandler):
         physics = UIHandler.physics
         params = urllib.parse.parse_qs(query_string or "")
         doc = (params.get('doc', [''])[0] or '').strip()
+
+        ui_font_links = (
+            "<link rel='preconnect' href='https://fonts.googleapis.com'/>"
+            "<link rel='preconnect' href='https://fonts.gstatic.com' crossorigin/>"
+            "<link href='https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap' rel='stylesheet'/>"
+        )
+        ui_css = (
+            ":root{--bg:#0a0a0b;--surface:#111113;--surface2:#18181b;"
+            "--border:rgba(255,255,255,0.08);--border2:rgba(255,255,255,0.12);"
+            "--text:#fafafa;--text2:#a1a1aa;--text3:#71717a;"
+            "--accent:#3b82f6;--accentDim:rgba(59,130,246,0.15);--success:#22c55e;}"
+            "body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;"
+            "background:radial-gradient(900px circle at 15% -10%, rgba(59,130,246,0.14), transparent 55%), var(--bg);"
+            "color:var(--text);margin:0;padding:28px;-webkit-font-smoothing:antialiased;}"
+            "h1{margin:0 0 10px;color:var(--text);font-size:22px;letter-spacing:-0.02em;}"
+            ".sub{color:var(--text2);margin:0 0 18px;font-size:13px;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;}"
+            "a{color:var(--accent);text-decoration:none;}"
+            "a:hover{text-decoration:underline;}"
+        )
         
         if not overlay:
             self.send_html(
@@ -158,22 +181,21 @@ class UIHandler(BaseHTTPRequestHandler):
             page = (
                 "<!doctype html><html><head><meta charset='utf-8'/>"
                 "<meta name='viewport' content='width=device-width,initial-scale=1'/>"
+                + ui_font_links +
                 "<title>Docs — Invariant</title>"
                 "<style>"
-                "body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0d1117;color:#e6edf3;margin:0;padding:24px;}"
-                "h1{margin:0 0 8px;color:#58a6ff;font-size:22px;}"
-                ".sub{color:#8b949e;margin:0 0 18px;font-size:13px;}"
-                ".list{display:flex;flex-direction:column;gap:10px;max-width:720px;}"
+                + ui_css +
+                ".list{display:flex;flex-direction:column;gap:10px;max-width:760px;}"
                 ".item{display:flex;justify-content:space-between;gap:12px;align-items:center;"
-                "padding:12px 14px;border:1px solid #21262d;border-radius:10px;background:#161b22;text-decoration:none;color:#e6edf3;}"
-                ".item:hover{border-color:#58a6ff;}"
-                ".name{font-weight:600;}"
-                ".meta{color:#8b949e;font-size:12px;white-space:nowrap;}"
-                "a.back{color:#58a6ff;text-decoration:none;font-size:13px;}"
-                "a.back:hover{text-decoration:underline;}"
+                "padding:12px 14px;border:1px solid var(--border);border-radius:12px;background:rgba(17,17,19,0.85);"
+                "text-decoration:none;color:var(--text);}"
+                ".item:hover{border-color:rgba(59,130,246,0.65);background:var(--accentDim);}"
+                ".name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}"
+                ".meta{color:var(--text3);font-size:12px;white-space:nowrap;"
+                "font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;}"
                 "</style></head><body>"
                 f"<h1>Docs</h1><p class='sub'>Crystal: <strong>{crystal}</strong> • choose a document overlay</p>"
-                "<p><a class='back' href='/'>← Back to search</a></p>"
+                "<p><a href='/'>← Back to search</a></p>"
                 "<div class='list'>"
                 + "".join(items)
                 + "</div></body></html>"
@@ -203,27 +225,25 @@ class UIHandler(BaseHTTPRequestHandler):
         page = (
             "<!doctype html><html><head><meta charset='utf-8'/>"
             "<meta name='viewport' content='width=device-width,initial-scale=1'/>"
+            + ui_font_links +
             "<title>Doc — Invariant</title>"
             "<style>"
-            "body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0d1117;color:#e6edf3;margin:0;padding:24px;}"
-            "h1{margin:0 0 8px;color:#58a6ff;font-size:22px;}"
-            ".sub{color:#8b949e;margin:0 0 18px;font-size:13px;}"
+            + ui_css +
             ".row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:10px 0 16px;}"
-            "a.back,a.link{color:#58a6ff;text-decoration:none;font-size:13px;}"
-            "a.back:hover,a.link:hover{text-decoration:underline;}"
-            ".frame{width:100%;height:70vh;border:1px solid #21262d;border-radius:12px;overflow:hidden;background:#0d1117;}"
+            ".row a{font-size:13px;}"
+            ".frame{width:100%;height:70vh;border:1px solid var(--border);border-radius:14px;overflow:hidden;background:rgba(255,255,255,0.02);}"
             "iframe{width:100%;height:100%;border:0;}"
-            ".pills{margin-top:14px;display:flex;flex-wrap:wrap;gap:8px;}"
-            ".pill{padding:6px 10px;border:1px solid #21262d;border-radius:999px;background:#161b22;"
-            "text-decoration:none;color:#e6edf3;font-size:12px;}"
-            ".pill:hover{border-color:#58a6ff;}"
+            ".pills{margin-top:14px;display:flex;flex-wrap:wrap;gap:8px;max-width:1100px;}"
+            ".pill{padding:6px 10px;border:1px solid var(--border);border-radius:999px;background:rgba(17,17,19,0.85);"
+            "text-decoration:none;color:var(--text);font-size:12px;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;}"
+            ".pill:hover{border-color:rgba(59,130,246,0.65);background:var(--accentDim);}"
             "</style></head><body>"
             f"<h1>{html.escape(doc)}</h1>"
             f"<p class='sub'>Crystal: <strong>{crystal}</strong> • {d['edges']} edges • {len(d['nodes'])} nodes</p>"
             "<div class='row'>"
-            f"<a class='back' href='/'>← Back</a>"
-            f"<a class='link' href='{graph_href}' target='_blank'>Open 3D</a>"
-            f"<a class='link' href='/doc'>All docs</a>"
+            f"<a href='/'>← Back</a>"
+            f"<a href='{graph_href}' target='_blank'>Open 3D</a>"
+            f"<a href='/doc'>All docs</a>"
             "</div>"
             f"<div class='frame'><iframe src='{graph_embed}'></iframe></div>"
             "<div class='pills'>"
@@ -382,47 +402,71 @@ class UIHandler(BaseHTTPRequestHandler):
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>3D Molecule — Invariant</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <script src="https://unpkg.com/3d-force-graph"></script>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #0d1117; color: #e6edf3; overflow: hidden; }
+    :root {
+      --bg: #0a0a0b;
+      --surface: #111113;
+      --surface-2: #18181b;
+      --border: rgba(255,255,255,0.08);
+      --border-2: rgba(255,255,255,0.12);
+      --text: #fafafa;
+      --text-2: #a1a1aa;
+      --text-3: #71717a;
+      --accent: #3b82f6;
+      --accent-dim: rgba(59,130,246,0.15);
+      --success: #22c55e;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+    }
+    body {
+      background: radial-gradient(900px circle at 15% -10%, rgba(59,130,246,0.14), transparent 55%), var(--bg);
+      color: var(--text);
+      overflow: hidden;
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
     #graph { position: absolute; inset: 0; }
     #labels { position: absolute; inset: 0; pointer-events: none; }
     .lbl {
       position: absolute;
       padding: 2px 6px;
       border-radius: 6px;
-      background: rgba(13, 17, 23, 0.65);
-      border: 1px solid rgba(48, 54, 61, 0.7);
-      font: 12px/1.3 -apple-system, BlinkMacSystemFont, sans-serif;
-      color: #e6edf3;
+      background: rgba(10, 10, 11, 0.72);
+      border: 1px solid rgba(255,255,255,0.10);
+      font: 12px/1.3 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      color: var(--text);
       white-space: nowrap;
       transform: translate(-50%, -135%);
     }
-    .lbl.solid { border-color: rgba(88, 166, 255, 0.55); }
+    .lbl.solid { border-color: rgba(59,130,246,0.55); }
     #hud {
       position: fixed;
       top: 14px;
       left: 14px;
       width: 360px;
-      background: rgba(22, 27, 34, 0.95);
-      border: 1px solid #30363d;
+      background: rgba(17, 17, 19, 0.92);
+      border: 1px solid var(--border);
       border-radius: 10px;
       padding: 12px 12px;
       z-index: 10;
       backdrop-filter: blur(6px);
     }
-    #hud h1 { font-size: 12px; color: #58a6ff; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; }
-    #hud .row { font: 12px/1.4 -apple-system, BlinkMacSystemFont, sans-serif; color: #8b949e; margin: 3px 0; }
-    #hud .row span { color: #e6edf3; }
+    #hud h1 { font-size: 12px; color: var(--accent); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px; }
+    #hud .row { font: 12px/1.4 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; color: var(--text-3); margin: 3px 0; }
+    #hud .row span { color: var(--text); }
     #hud .btns { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
     #hud button {
-      background: #21262d; color: #e6edf3; border: 1px solid #30363d;
+      background: rgba(255,255,255,0.03); color: var(--text); border: 1px solid var(--border);
       padding: 6px 8px; border-radius: 8px; cursor: pointer;
       font-size: 12px;
     }
-    #hud button.active { border-color: #58a6ff; }
-    #hud a { color: #58a6ff; text-decoration: none; }
+    #hud button.active { border-color: rgba(59,130,246,0.7); background: var(--accent-dim); }
+    #hud a { color: var(--accent); text-decoration: none; }
     body.embed #hud { display: none; }
     .graph-tooltip { display: none !important; }
   </style>
@@ -476,7 +520,7 @@ class UIHandler(BaseHTTPRequestHandler):
 
     if (!nodes.length) {
       document.getElementById('focusName').textContent = '—';
-      graphEl.innerHTML = '<div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:#8b949e;font:14px -apple-system;">No local graph</div>';
+      graphEl.innerHTML = '<div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:rgba(255,255,255,0.55);font:14px Inter, -apple-system;">No local graph</div>';
       return;
     }
 
@@ -518,7 +562,7 @@ class UIHandler(BaseHTTPRequestHandler):
     let hoveredId = null;
 
     const Graph = ForceGraph3D()(graphEl)
-      .backgroundColor('#0d1117')
+      .backgroundColor('#0a0a0b')
       .showNavInfo(false)
       .nodeId('id')
       .graphData({ nodes, links })
@@ -741,10 +785,10 @@ class UIHandler(BaseHTTPRequestHandler):
             for n in raw_neighbors:
                 h8 = n.get('hash8', '')
                 weight = n.get('weight', 0)
-                is_local = 'doc' in n  # overlay edges include doc field
-                doc = n.get('doc') if is_local else None
+                doc = n.get('doc')
+                is_local = (n.get('source') == 'local') or (doc is not None)
                 line = n.get('line') if is_local else None
-                snippet = n.get('snippet') if is_local else None
+                ctx_hash = n.get('ctx_hash') if is_local else None
                 
                 if is_local and doc_filter and doc != doc_filter:
                     continue
@@ -771,8 +815,8 @@ class UIHandler(BaseHTTPRequestHandler):
                 # Include provenance if available
                 if line is not None:
                     neighbor_data['line'] = line
-                if snippet:
-                    neighbor_data['snippet'] = snippet
+                if ctx_hash:
+                    neighbor_data['ctx_hash'] = ctx_hash
                 
                 neighbors.append(neighbor_data)
             
@@ -874,6 +918,19 @@ class UIHandler(BaseHTTPRequestHandler):
                 self.send_json({'error': 'No text provided'}, 400)
                 return
             
+            # Import uploaded doc into local storage (so it can be opened / used for context later).
+            # This does not duplicate the overlay — it creates the σ-source file itself.
+            safe_name = Path(str(filename)).name or "document.txt"
+            stored_doc = safe_name
+            try:
+                uploads_dir = Path('./.invariant/uploads')
+                uploads_dir.mkdir(parents=True, exist_ok=True)
+                save_path = uploads_dir / safe_name
+                save_path.write_text(text, encoding='utf-8')
+                stored_doc = str(Path('uploads') / safe_name)
+            except Exception:
+                stored_doc = safe_name
+            
             physics = UIHandler.physics
             overlay = UIHandler.overlay
             overlay_path = UIHandler.overlay_path
@@ -882,14 +939,19 @@ class UIHandler(BaseHTTPRequestHandler):
                 self.send_json({'error': 'Not connected'}, 500)
                 return
             
-            # Simple tokenization
-            words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
-            unique_words = list(dict.fromkeys(words))[:500]  # Process up to 500 unique words
+            # Tokenize with line positions (Anchor Integrity Protocol needs stable coordinates).
+            tokens: list[tuple[str, int]] = []
+            lines = text.split('\n')
+            for line_num, line in enumerate(lines, 1):
+                for match in re.finditer(r'\b[a-zA-Z]{3,}\b', line):
+                    tokens.append((match.group().lower(), line_num))
+            
+            words = [w for (w, _ln) in tokens]
+            unique_words = list(dict.fromkeys(words))[:500]  # limit network + processing
             
             # Find anchors using single BATCH API call (O(1) network round-trip)
             # Server now properly supports limit=0 for meta-only checks
             word_to_hash = {w: hash8_hex(f"Ġ{w}") for w in unique_words}
-            hash_to_word = {h: w for w, h in word_to_hash.items()}
             
             # Single HTTP call - meta only (no neighbors, just existence check)
             try:
@@ -933,17 +995,47 @@ class UIHandler(BaseHTTPRequestHandler):
                 self.send_json({'error': 'Too few concepts found in document'}, 400)
                 return
             
+            anchor_words = {w for (w, _h8) in anchors}
+            
+            # Anchor Integrity Protocol: ctx_hash for anchor window (±2 words)
+            import hashlib
+            def compute_ctx_hash_at(idx: int, k: int = 2) -> str:
+                start = max(0, idx - k)
+                end = min(len(tokens), idx + k + 1)
+                window_words = [tokens[i][0] for i in range(start, end)]
+                normalized = ' '.join(w.lower() for w in window_words)
+                return hashlib.sha256(normalized.encode('utf-8')).hexdigest()[:8]
+            
+            # Collect anchor occurrences in original order for edge construction.
+            occurrences: list[tuple[str, str, int, str]] = []
+            for idx, (word, line_no) in enumerate(tokens):
+                if word not in anchor_words:
+                    continue
+                h8 = word_to_hash.get(word) or hash8_hex(f"Ġ{word}")
+                occurrences.append((word, h8, line_no, compute_ctx_hash_at(idx)))
+            
+            if len(occurrences) < 2:
+                self.send_json({'error': 'Too few anchor occurrences found'}, 400)
+                return
+            
             # Create edges
             if overlay is None:
                 overlay = OverlayGraph()
                 UIHandler.overlay = overlay
             
             edges_added = 0
-            for i in range(len(anchors) - 1):
-                src_word, src_h8 = anchors[i]
-                tgt_word, tgt_h8 = anchors[i + 1]
+            for i in range(len(occurrences) - 1):
+                src_word, src_h8, _src_line, _src_ctx = occurrences[i]
+                tgt_word, tgt_h8, tgt_line, tgt_ctx = occurrences[i + 1]
                 
-                overlay.add_edge(src_h8, tgt_h8, weight=1.0, doc=filename)
+                overlay.add_edge(
+                    src_h8,
+                    tgt_h8,
+                    weight=1.0,
+                    doc=stored_doc,
+                    line=tgt_line,
+                    ctx_hash=tgt_ctx,
+                )
                 overlay.define_label(src_h8, src_word)
                 overlay.define_label(tgt_h8, tgt_word)
                 edges_added += 1
@@ -963,13 +1055,168 @@ class UIHandler(BaseHTTPRequestHandler):
             
             self.send_json({
                 'success': True,
-                'filename': filename,
+                'filename': stored_doc,
                 'scanned_words': len(unique_words),
                 'candidates': len(candidates),
-                'anchors': len(anchors),
+                'anchors': len(anchor_words),
                 'edges': edges_added
             })
             
+        except json.JSONDecodeError:
+            self.send_json({'error': 'Invalid JSON'}, 400)
+        except Exception as e:
+            self.send_json({'error': str(e)}, 500)
+
+    def api_reindex(self):
+        """
+        Re-index an existing local document (replace σ-edges for that doc).
+        
+        Motivation:
+        - Older overlays may lack line/ctx_hash provenance.
+        - Reindex rebuilds σ-edges with Anchor Integrity Protocol fields so UI can show context + open file.
+        """
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+        
+        try:
+            import math
+            data = json.loads(body)
+            doc = (data.get('doc') or '').strip()
+            if not doc:
+                self.send_json({'error': 'Missing doc'}, 400)
+                return
+            
+            physics = UIHandler.physics
+            overlay = UIHandler.overlay
+            overlay_path = UIHandler.overlay_path
+            
+            if not physics or not overlay:
+                self.send_json({'error': 'No overlay loaded. Ingest documents first.'}, 400)
+                return
+            
+            doc_path, searched = self._resolve_doc_path(doc)
+            if not doc_path:
+                self.send_json({'error': f'Document not found: {doc}', 'searched': [str(c) for c in searched]}, 404)
+                return
+            
+            text = doc_path.read_text(encoding='utf-8')
+            if not text.strip():
+                self.send_json({'error': 'Document is empty'}, 400)
+                return
+            
+            # Remove existing edges for this doc (replace)
+            removed = 0
+            for src in list(overlay.edges.keys()):
+                before = len(overlay.edges[src])
+                overlay.edges[src] = [e for e in overlay.edges[src] if e.doc != doc]
+                removed += before - len(overlay.edges[src])
+                if not overlay.edges[src]:
+                    del overlay.edges[src]
+            
+            # Tokenize with line positions
+            tokens: list[tuple[str, int]] = []
+            lines = text.split('\n')
+            for line_num, line in enumerate(lines, 1):
+                for match in re.finditer(r'\b[a-zA-Z]{3,}\b', line):
+                    tokens.append((match.group().lower(), line_num))
+            
+            words = [w for (w, _ln) in tokens]
+            unique_words = list(dict.fromkeys(words))[:500]
+            word_to_hash = {w: hash8_hex(f"Ġ{w}") for w in unique_words}
+            
+            try:
+                batch_results = physics._client.get_halo_pages(word_to_hash.values(), limit=0)
+            except Exception as e:
+                self.send_json({'error': f'Server error: {e}'}, 500)
+                return
+            
+            mean_mass = physics.mean_mass
+            candidates: list[tuple[str, str, float]] = []
+            for word in unique_words:
+                h8 = word_to_hash.get(word)
+                if not h8:
+                    continue
+                result = batch_results.get(h8) or {}
+                if not result.get('exists'):
+                    continue
+                meta = result.get('meta') or {}
+                try:
+                    degree_total = int(meta.get('degree_total') or 0)
+                except Exception:
+                    degree_total = 0
+                try:
+                    mass = 1.0 / math.log(2 + max(0, degree_total))
+                except Exception:
+                    mass = 0.0
+                candidates.append((word, h8, mass))
+            
+            solid = [(w, h8) for (w, h8, m) in candidates if m > mean_mass]
+            if len(solid) >= 2:
+                anchors = solid
+            else:
+                top = sorted(candidates, key=lambda x: x[2], reverse=True)[:64]
+                top_set = {h8 for (_, h8, _) in top}
+                anchors = [(w, h8) for (w, h8, _) in candidates if h8 in top_set]
+            
+            if len(anchors) < 2:
+                self.send_json({'error': 'Too few concepts found in document'}, 400)
+                return
+            
+            anchor_words = {w for (w, _h8) in anchors}
+            
+            import hashlib
+            def compute_ctx_hash_at(idx: int, k: int = 2) -> str:
+                start = max(0, idx - k)
+                end = min(len(tokens), idx + k + 1)
+                window_words = [tokens[i][0] for i in range(start, end)]
+                normalized = ' '.join(w.lower() for w in window_words)
+                return hashlib.sha256(normalized.encode('utf-8')).hexdigest()[:8]
+            
+            occurrences: list[tuple[str, str, int, str]] = []
+            for idx, (word, line_no) in enumerate(tokens):
+                if word not in anchor_words:
+                    continue
+                h8 = word_to_hash.get(word) or hash8_hex(f"Ġ{word}")
+                occurrences.append((word, h8, line_no, compute_ctx_hash_at(idx)))
+            
+            if len(occurrences) < 2:
+                self.send_json({'error': 'Too few anchor occurrences found'}, 400)
+                return
+            
+            edges_added = 0
+            for i in range(len(occurrences) - 1):
+                src_word, src_h8, _src_line, _src_ctx = occurrences[i]
+                tgt_word, tgt_h8, tgt_line, tgt_ctx = occurrences[i + 1]
+                overlay.add_edge(
+                    src_h8,
+                    tgt_h8,
+                    weight=1.0,
+                    doc=doc,
+                    line=tgt_line,
+                    ctx_hash=tgt_ctx,
+                )
+                overlay.define_label(src_h8, src_word)
+                overlay.define_label(tgt_h8, tgt_word)
+                edges_added += 1
+            
+            if overlay_path:
+                overlay.save(overlay_path)
+            else:
+                default_path = Path('./.invariant/overlay.jsonl')
+                default_path.parent.mkdir(parents=True, exist_ok=True)
+                overlay.save(default_path)
+                UIHandler.overlay_path = default_path
+            
+            UIHandler._graph_cache_key = None
+            UIHandler._graph_cache_value = None
+            
+            self.send_json({
+                'success': True,
+                'doc': doc,
+                'removed_edges': removed,
+                'edges': edges_added,
+                'anchors': len(anchor_words),
+            })
         except json.JSONDecodeError:
             self.send_json({'error': 'Invalid JSON'}, 400)
         except Exception as e:
@@ -1093,19 +1340,7 @@ class UIHandler(BaseHTTPRequestHandler):
             self.send_json({'error': 'Invalid line number'}, 400)
             return
         
-        # Find the document file
-        doc_path = None
-        candidates = [
-            Path(doc),
-            Path('.') / doc,
-            Path('.invariant') / doc,
-            Path('docs') / doc,
-        ]
-        
-        for candidate in candidates:
-            if candidate.exists() and candidate.is_file():
-                doc_path = candidate
-                break
+        doc_path, candidates = self._resolve_doc_path(doc)
         
         if not doc_path:
             self.send_json({
@@ -1186,6 +1421,133 @@ class UIHandler(BaseHTTPRequestHandler):
             
         except Exception as e:
             self.send_json({'error': str(e), 'status': 'broken'}, 500)
+
+    def _resolve_doc_path(self, doc: str) -> tuple[Optional[Path], list[Path]]:
+        """Resolve a document path within project roots (workspace, .invariant, docs)."""
+        project_root = Path('.').resolve()
+        doc_rel = Path(doc)
+        candidates: list[Path] = []
+        
+        if doc_rel.is_absolute():
+            try:
+                resolved = doc_rel.resolve()
+                if project_root in resolved.parents or resolved == project_root:
+                    candidates.append(resolved)
+            except Exception:
+                pass
+        else:
+            for base in (project_root, project_root / '.invariant', project_root / 'docs'):
+                try:
+                    resolved = (base / doc_rel).resolve()
+                except Exception:
+                    continue
+                if project_root in resolved.parents or resolved == project_root:
+                    candidates.append(resolved)
+        
+        for candidate in candidates:
+            if candidate.exists() and candidate.is_file():
+                return candidate, candidates
+        return None, candidates
+
+    def api_open(self, query_string: str):
+        """
+        Open/reveal a local σ-source file at a given line (macOS).
+        
+        This is a UX bridge: UI -> Reality, without duplicating content (Invariant III).
+        Supports Anchor Integrity Protocol via ctx_hash (self-healing line relocation).
+        
+        Query params:
+            mode: 'open' | 'reveal' | 'vscode'
+            doc: document filename/path (relative to project / .invariant / docs)
+            line: line number (1-indexed)
+            ctx_hash: optional semantic checksum (for relocation)
+        """
+        import platform
+        import subprocess
+        
+        params = urllib.parse.parse_qs(query_string or "")
+        mode = (params.get('mode', ['open'])[0] or 'open').strip().lower()
+        doc = (params.get('doc', [''])[0] or '').strip()
+        line_str = (params.get('line', [''])[0] or '').strip()
+        ctx_hash = (params.get('ctx_hash', [''])[0] or '').strip()
+        
+        if not doc or not line_str:
+            self.send_json({'error': 'Missing doc or line parameter'}, 400)
+            return
+        
+        try:
+            target_line = int(line_str)
+        except ValueError:
+            self.send_json({'error': 'Invalid line number'}, 400)
+            return
+        
+        doc_path, candidates = self._resolve_doc_path(doc)
+        
+        if not doc_path:
+            self.send_json({'error': f'Document not found: {doc}', 'searched': [str(c) for c in candidates]}, 404)
+            return
+        
+        # Determine actual line via ctx_hash (self-healing)
+        status = 'unchecked'
+        actual_line = target_line
+        try:
+            text = doc_path.read_text(encoding='utf-8')
+            lines = text.split('\n')
+            tokens = self._tokenize_file(text)
+            if ctx_hash:
+                line_hashes = self._compute_hash_at_line(tokens, target_line)
+                if ctx_hash in line_hashes:
+                    status = 'fresh'
+                else:
+                    scan_radius = 50
+                    found_line = None
+                    for offset in range(1, scan_radius + 1):
+                        up = target_line - offset
+                        if up >= 1:
+                            if ctx_hash in self._compute_hash_at_line(tokens, up):
+                                found_line = up
+                                break
+                        down = target_line + offset
+                        if down <= len(lines):
+                            if ctx_hash in self._compute_hash_at_line(tokens, down):
+                                found_line = down
+                                break
+                    if found_line:
+                        status = 'relocated'
+                        actual_line = found_line
+                    else:
+                        status = 'broken'
+        except Exception:
+            status = 'broken'
+            actual_line = target_line
+        
+        # Execute open (macOS only for now)
+        if platform.system().lower() != 'darwin':
+            self.send_json({'error': 'Open is only implemented for macOS', 'status': status}, 501)
+            return
+        
+        try:
+            run = None
+            if mode == 'reveal':
+                run = subprocess.run(['open', '-R', str(doc_path)], check=False)
+            elif mode == 'vscode':
+                target = f"{doc_path}:{actual_line}"
+                run = subprocess.run(['open', '-a', 'Visual Studio Code', '--args', '-g', target], check=False)
+            else:
+                run = subprocess.run(['open', str(doc_path)], check=False)
+            
+            self.send_json({
+                'ok': (run.returncode == 0) if run else True,
+                'returncode': run.returncode if run else None,
+                'mode': mode,
+                'doc': doc,
+                'doc_path': str(doc_path),
+                'requested_line': target_line,
+                'actual_line': actual_line,
+                'status': status,
+            })
+        except Exception as e:
+            self.send_json({'error': str(e), 'status': status}, 500)
     
     def _tokenize_file(self, text: str) -> list:
         """Tokenize text with position info for hash computation."""

@@ -21,30 +21,53 @@ HTML_PAGE = '''<!DOCTYPE html>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Invariant</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg: #0a0a0b;
+            --surface: #111113;
+            --surface-2: #18181b;
+            --border: rgba(255, 255, 255, 0.08);
+            --border-2: rgba(255, 255, 255, 0.12);
+            --text: #fafafa;
+            --text-2: #a1a1aa;
+            --text-3: #71717a;
+            --accent: #3b82f6;
+            --accent-dim: rgba(59, 130, 246, 0.15);
+            --success: #22c55e;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+        }
         
         body {
-            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
-            background: #0d1117;
-            color: #e6edf3;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: radial-gradient(900px circle at 15% -10%, rgba(59, 130, 246, 0.14), transparent 55%), var(--bg);
+            color: var(--text);
             min-height: 100vh;
-            padding: 40px 20px;
+            padding: 48px 20px 80px;
+            -webkit-font-smoothing: antialiased;
         }
         
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-        }
+	        .container {
+	            max-width: 1100px;
+	            margin: 0 auto;
+	        }
         
-        h1 {
-            font-size: 28px;
-            margin-bottom: 8px;
-            color: #58a6ff;
-        }
+	        h1 {
+	            font-size: 28px;
+	            margin-bottom: 8px;
+	            color: var(--text);
+	            letter-spacing: -0.02em;
+	        }
+
+	        .mark { color: var(--accent); }
         
         .subtitle {
-            color: #8b949e;
+            color: var(--text-2);
             margin-bottom: 32px;
         }
 
@@ -65,7 +88,7 @@ HTML_PAGE = '''<!DOCTYPE html>
 
         .toolbar-label {
             font-size: 12px;
-            color: #8b949e;
+            color: var(--text-3);
         }
 
         .doc-picker {
@@ -84,47 +107,68 @@ HTML_PAGE = '''<!DOCTYPE html>
         .doc-item {
             text-align: left;
             padding: 10px 12px;
-            background: #161b22;
-            border: 1px solid #30363d;
+            background: var(--surface);
+            border: 1px solid var(--border);
             border-radius: 10px;
-            color: #e6edf3;
+            color: var(--text);
             cursor: pointer;
         }
-
-        .doc-item:hover { border-color: #58a6ff; }
+        
+        .doc-item:hover { border-color: rgba(59, 130, 246, 0.6); background: rgba(59, 130, 246, 0.06); }
 
         .doc-item.active {
-            border-color: #58a6ff;
-            box-shadow: 0 0 0 1px rgba(88,166,255,0.25) inset;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 1px rgba(59,130,246,0.25) inset;
         }
 
         .doc-item .name { font-weight: 600; font-size: 13px; }
-        .doc-item .meta { color: #8b949e; font-size: 11px; margin-top: 4px; }
+        .doc-item .meta { color: var(--text-3); font-size: 11px; margin-top: 4px; font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
 
         .doc-empty {
             grid-column: 1 / -1;
-            color: #8b949e;
+            color: var(--text-2);
             font-size: 12px;
             padding: 10px 12px;
-            border: 1px dashed #30363d;
+            border: 1px dashed var(--border-2);
             border-radius: 10px;
-            background: #0d1117;
+            background: rgba(255,255,255,0.03);
         }
 
         .doc-link {
             font-size: 12px;
-            color: #58a6ff;
+            color: var(--accent);
             text-decoration: none;
         }
 
-        .doc-link:hover { text-decoration: underline; }
+	        .doc-link:hover { text-decoration: underline; }
 
-        .graph-preview {
+	        .doc-action {
+	            background: rgba(255,255,255,0.03);
+	            color: var(--text);
+	            border: 1px solid var(--border);
+	            padding: 6px 10px;
+	            border-radius: 10px;
+	            cursor: pointer;
+	            font-size: 12px;
+	            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	        }
+
+	        .doc-action:hover:not(:disabled) {
+	            border-color: rgba(59, 130, 246, 0.65);
+	            background: var(--accent-dim);
+	        }
+
+	        .doc-action:disabled {
+	            opacity: 0.55;
+	            cursor: not-allowed;
+	        }
+
+	        .graph-preview {
             margin-top: 16px;
-            border: 1px solid #21262d;
+            border: 1px solid var(--border);
             border-radius: 10px;
             overflow: hidden;
-            background: #0d1117;
+            background: rgba(255,255,255,0.03);
         }
 
         .graph-preview-header {
@@ -132,10 +176,10 @@ HTML_PAGE = '''<!DOCTYPE html>
             justify-content: space-between;
             align-items: center;
             padding: 10px 12px;
-            background: #161b22;
-            border-bottom: 1px solid #21262d;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border);
             font-size: 12px;
-            color: #8b949e;
+            color: var(--text-2);
         }
 
         .graph-preview-actions {
@@ -145,19 +189,19 @@ HTML_PAGE = '''<!DOCTYPE html>
         }
 
         .mini-btn {
-            background: #21262d;
-            color: #e6edf3;
-            border: 1px solid #30363d;
+            background: rgba(255,255,255,0.03);
+            color: var(--text);
+            border: 1px solid var(--border);
             padding: 4px 8px;
             border-radius: 8px;
             cursor: pointer;
             font-size: 12px;
         }
 
-        .mini-btn.active { border-color: #58a6ff; }
+        .mini-btn.active { border-color: var(--accent); background: var(--accent-dim); }
 
         .graph-preview-header a {
-            color: #58a6ff;
+            color: var(--accent);
             text-decoration: none;
         }
 
@@ -180,30 +224,31 @@ HTML_PAGE = '''<!DOCTYPE html>
             flex: 1;
             padding: 14px 18px;
             font-size: 16px;
-            background: #161b22;
-            border: 1px solid #30363d;
+            background: var(--surface);
+            border: 1px solid var(--border);
             border-radius: 8px;
-            color: #e6edf3;
+            color: var(--text);
         }
         
         .search-input:focus {
             outline: none;
-            border-color: #58a6ff;
+            border-color: rgba(59,130,246,0.7);
+            box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
         }
         
         .btn {
             padding: 14px 24px;
             font-size: 14px;
             font-weight: 500;
-            background: #238636;
-            color: white;
+            background: var(--text);
+            color: var(--bg);
             border: none;
             border-radius: 8px;
             cursor: pointer;
         }
         
-        .btn:hover { background: #2ea043; }
-        .btn:disabled { background: #21262d; cursor: wait; }
+        .btn:hover { opacity: 0.92; }
+        .btn:disabled { opacity: 0.6; cursor: wait; }
         
         /* Autocomplete styles */
         .search-wrapper {
@@ -216,8 +261,8 @@ HTML_PAGE = '''<!DOCTYPE html>
             top: 100%;
             left: 0;
             right: 0;
-            background: #161b22;
-            border: 1px solid #30363d;
+            background: var(--surface);
+            border: 1px solid var(--border);
             border-top: none;
             border-radius: 0 0 8px 8px;
             max-height: 300px;
@@ -237,15 +282,15 @@ HTML_PAGE = '''<!DOCTYPE html>
         }
         
         .autocomplete-item:hover {
-            background: #21262d;
+            background: rgba(255,255,255,0.03);
         }
         
         .autocomplete-item.local {
-            border-left: 3px solid #3fb950;
+            border-left: 3px solid var(--success);
         }
         
         .autocomplete-item.global {
-            border-left: 3px solid #58a6ff;
+            border-left: 3px solid var(--accent);
         }
         
         .autocomplete-source {
@@ -256,27 +301,27 @@ HTML_PAGE = '''<!DOCTYPE html>
         }
         
         .autocomplete-source.local {
-            background: rgba(63, 185, 80, 0.2);
-            color: #3fb950;
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--success);
         }
         
         .autocomplete-source.global {
-            background: rgba(88, 166, 255, 0.2);
-            color: #58a6ff;
+            background: var(--accent-dim);
+            color: var(--accent);
         }
         
         .loading {
             text-align: center;
             padding: 40px;
-            color: #8b949e;
+            color: var(--text-2);
         }
         
         .spinner {
             display: inline-block;
             width: 24px;
             height: 24px;
-            border: 3px solid #30363d;
-            border-top: 3px solid #58a6ff;
+            border: 3px solid var(--border);
+            border-top: 3px solid var(--accent);
             border-radius: 50%;
             animation: spin 1s linear infinite;
             margin-right: 12px;
@@ -289,16 +334,16 @@ HTML_PAGE = '''<!DOCTYPE html>
         }
         
         .results {
-            background: #161b22;
+            background: var(--surface);
             border-radius: 12px;
             padding: 24px;
-            border: 1px solid #21262d;
+            border: 1px solid var(--border);
         }
         
         .result-header {
             margin-bottom: 20px;
             padding-bottom: 20px;
-            border-bottom: 1px solid #21262d;
+            border-bottom: 1px solid var(--border);
         }
         
         .result-header h2 {
@@ -317,20 +362,21 @@ HTML_PAGE = '''<!DOCTYPE html>
         }
         
         .phase-badge.solid {
-            background: rgba(88, 166, 255, 0.2);
-            color: #58a6ff;
+            background: var(--accent-dim);
+            color: var(--accent);
         }
         
         .phase-badge.gas {
-            background: rgba(139, 148, 158, 0.2);
-            color: #8b949e;
+            background: rgba(255,255,255,0.06);
+            color: var(--text-2);
         }
         
         .result-meta {
             display: flex;
             gap: 16px;
             font-size: 12px;
-            color: #8b949e;
+            color: var(--text-3);
+            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
         }
         
         .result-list {
@@ -344,19 +390,19 @@ HTML_PAGE = '''<!DOCTYPE html>
             padding: 12px 16px;
             border-radius: 8px;
             margin-bottom: 8px;
-            background: #0d1117;
+            background: rgba(255,255,255,0.02);
             cursor: pointer;
             transition: background 0.2s;
             border: 1px solid transparent;
         }
         
         .result-item:hover {
-            background: #21262d;
-            border-color: #30363d;
+            background: rgba(59,130,246,0.06);
+            border-color: var(--border);
         }
         
         .result-item.local {
-            border-left: 3px solid #3fb950;
+            border-left: 3px solid var(--success);
         }
         
         .result-word {
@@ -365,8 +411,9 @@ HTML_PAGE = '''<!DOCTYPE html>
         }
         
         .result-weight {
-            color: #8b949e;
+            color: var(--text-2);
             font-size: 12px;
+            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
         }
         
         .badge {
@@ -377,13 +424,13 @@ HTML_PAGE = '''<!DOCTYPE html>
         }
         
         .badge-local {
-            background: rgba(63, 185, 80, 0.2);
-            color: #3fb950;
+            background: rgba(34, 197, 94, 0.15);
+            color: var(--success);
         }
         
         .badge-global {
-            background: rgba(88, 166, 255, 0.2);
-            color: #58a6ff;
+            background: var(--accent-dim);
+            color: var(--accent);
         }
         
         .orbit-group {
@@ -393,38 +440,45 @@ HTML_PAGE = '''<!DOCTYPE html>
         .orbit-group h4 {
             font-size: 13px;
             margin-bottom: 12px;
-            color: #8b949e;
+            color: var(--text-2);
         }
         
         .empty {
             text-align: center;
             padding: 60px 20px;
-            color: #8b949e;
+            color: var(--text-2);
         }
         
         .doc-section {
             margin-top: 40px;
             padding-top: 24px;
-            border-top: 1px solid #21262d;
+            border-top: 1px solid var(--border);
         }
         
         .doc-section h3 {
             font-size: 14px;
-            color: #8b949e;
+            color: var(--text-2);
             margin-bottom: 16px;
         }
         
         .doc-upload {
-            border: 2px dashed #30363d;
+            border: 1px dashed var(--border-2);
             border-radius: 8px;
             padding: 40px;
             text-align: center;
             cursor: pointer;
             transition: border-color 0.2s;
+            background: rgba(255,255,255,0.02);
         }
         
         .doc-upload:hover {
-            border-color: #58a6ff;
+            border-color: var(--accent);
+            background: var(--accent-dim);
+        }
+
+        .doc-upload.drag-over {
+            border-color: var(--accent);
+            background: var(--accent-dim);
         }
         
         .doc-upload input {
@@ -437,30 +491,33 @@ HTML_PAGE = '''<!DOCTYPE html>
             left: 0;
             right: 0;
             padding: 8px 20px;
-            background: #161b22;
-            border-top: 1px solid #21262d;
+            background: rgba(10,10,11,0.7);
+            backdrop-filter: blur(12px);
+            border-top: 1px solid var(--border);
             font-size: 12px;
-            color: #8b949e;
+            color: var(--text-3);
             display: flex;
             justify-content: space-between;
         }
         
         .status-local {
-            color: #3fb950;
+            color: var(--success);
+            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
         }
     </style>
 </head>
 <body>
 	    <div class="container">
-	        <h1>◆ Invariant</h1>
+		        <h1><span class="mark">◆</span> Invariant</h1>
 	        <p class="subtitle">Semantic Knowledge Explorer</p>
 	        
 	        <div class="toolbar">
-	            <div class="toolbar-left">
-	                <span class="toolbar-label">Documents</span>
-	                <a id="docLink" class="doc-link" href="/doc">Open</a>
-	            </div>
-	        </div>
+		            <div class="toolbar-left">
+		                <span class="toolbar-label">Documents</span>
+		                <a id="docLink" class="doc-link" href="/doc">Open</a>
+		                <button id="reindexBtn" class="doc-action" type="button" disabled>Reindex</button>
+		            </div>
+		        </div>
 
             <div class="doc-picker">
                 <div id="docList" class="doc-list"></div>
@@ -485,13 +542,10 @@ HTML_PAGE = '''<!DOCTYPE html>
         
         <div class="doc-section">
             <h3>ADD DOCUMENT</h3>
-            <div class="doc-upload" id="dropZone" onclick="document.getElementById('fileInput').click()"
-                 ondragover="event.preventDefault(); this.style.borderColor='#58a6ff'; this.style.background='#161b22'"
-                 ondragleave="this.style.borderColor='#30363d'; this.style.background=''"
-                 ondrop="event.preventDefault(); this.style.borderColor='#30363d'; this.style.background=''; handleDrop(event)">
+            <div class="doc-upload" id="dropZone">
                 <input type="file" id="fileInput" accept=".txt,.md" onchange="uploadFile(this)">
                 <p>📄 Drag file here or click to upload</p>
-                <p style="font-size: 12px; color: #8b949e; margin-top: 8px;">
+                <p style="font-size: 12px; color: var(--text-3); margin-top: 8px;">
                     Supports .txt and .md files (up to 500 unique words will be indexed)
                 </p>
             </div>
@@ -500,7 +554,7 @@ HTML_PAGE = '''<!DOCTYPE html>
     
 	    <div class="status-bar">
 	        <span>Crystal: <strong>$$CRYSTAL_ID$$</strong></span>
-	        <span><a href="/doc" style="color:#58a6ff">📄 Docs</a> | <a href="/graph3d" style="color:#58a6ff">🧬 3D</a></span>
+	        <span><a href="/doc" style="color:var(--accent)">📄 Docs</a> | <a href="/graph3d" style="color:var(--accent)">🧬 3D</a></span>
 	        <span class="status-local">$$OVERLAY_STATUS$$</span>
 	    </div>
 
@@ -508,9 +562,12 @@ HTML_PAGE = '''<!DOCTYPE html>
 	        const queryInput = document.getElementById('query');
 	        const searchBtn = document.getElementById('searchBtn');
 	        const content = document.getElementById('content');
-	        const autocomplete = document.getElementById('autocomplete');
-	        const docList = document.getElementById('docList');
-	        const docLink = document.getElementById('docLink');
+		        const autocomplete = document.getElementById('autocomplete');
+		        const docList = document.getElementById('docList');
+		        const docLink = document.getElementById('docLink');
+                const reindexBtn = document.getElementById('reindexBtn');
+	            const dropZone = document.getElementById('dropZone');
+	            const fileInput = document.getElementById('fileInput');
 	        
 	        let selectedDoc = '';
             let miniLabels = true;
@@ -530,12 +587,67 @@ HTML_PAGE = '''<!DOCTYPE html>
                 try { return decodeURIComponent(v); } catch (e) { return String(v || ''); }
             }
 
+            if (dropZone && fileInput) {
+                dropZone.addEventListener('click', () => fileInput.click());
+                dropZone.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    dropZone.classList.add('drag-over');
+                });
+                dropZone.addEventListener('dragleave', () => {
+                    dropZone.classList.remove('drag-over');
+                });
+                dropZone.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    dropZone.classList.remove('drag-over');
+                    handleDrop(e);
+                });
+            }
+
+            async function reindexSelectedDoc() {
+                if (!selectedDoc) return;
+                if (reindexBtn) reindexBtn.disabled = true;
+                content.innerHTML = '<div class="loading"><span class="spinner"></span>Reindexing ' + escHtml(selectedDoc) + '...</div>';
+                try {
+                    const res = await fetch('/api/reindex', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ doc: selectedDoc })
+                    });
+                    const data = await res.json();
+                    if (data.error) {
+                        content.innerHTML = '<div class="empty"><h3>Error</h3><p>' + escHtml(data.error) + '</p></div>';
+                        return;
+                    }
+                    try { await loadDocs(); } catch (e) {}
+                    if (queryInput.value.trim()) await search();
+                    content.innerHTML = '<div class="empty"><h3>✓ Reindexed</h3><p>' + escHtml(selectedDoc) + '</p>'
+                        + '<p style="margin-top:10px;color:var(--text-3);font-family:\\'JetBrains Mono\\', ui-monospace;">'
+                        + (data.edges || 0) + ' edges rebuilt • removed ' + (data.removed_edges || 0) + '</p></div>';
+                } catch (err) {
+                    content.innerHTML = '<div class="empty"><h3>Reindex Error</h3><p>' + escHtml(err.message) + '</p></div>';
+                } finally {
+                    if (reindexBtn) reindexBtn.disabled = !selectedDoc;
+                }
+            }
+
+            if (reindexBtn) {
+                reindexBtn.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    await reindexSelectedDoc();
+                });
+            }
+
 	        function setSelectedDoc(doc) {
-	            selectedDoc = (doc || '').trim();
-	            try { localStorage.setItem('inv_doc', selectedDoc); } catch (e) {}
-	            if (docLink) {
-	                docLink.href = selectedDoc ? ('/doc?doc=' + encodeURIComponent(selectedDoc)) : '/doc';
-	            }
+		            selectedDoc = (doc || '').trim();
+		            try { localStorage.setItem('inv_doc', selectedDoc); } catch (e) {}
+		            if (docLink) {
+		                docLink.href = selectedDoc ? ('/doc?doc=' + encodeURIComponent(selectedDoc)) : '/doc';
+		            }
+                    if (reindexBtn) {
+                        reindexBtn.disabled = !selectedDoc;
+                        reindexBtn.title = selectedDoc ? ('Reindex ' + selectedDoc + ' (adds provenance)') : 'Select a document to reindex';
+                    }
                 if (docList) {
                     docList.querySelectorAll('.doc-item').forEach(el => {
                         el.classList.toggle('active', safeDecode(el.dataset.doc || '') === selectedDoc);
@@ -777,85 +889,97 @@ HTML_PAGE = '''<!DOCTYPE html>
             const near = data.neighbors.filter(n => Math.abs(n.weight) >= 0.5 && Math.abs(n.weight) < 0.7);
             const far = data.neighbors.filter(n => Math.abs(n.weight) < 0.5);
             
-            const renderGroup = (items, title, color) => {
-                if (items.length === 0) return '';
-                let group = `<div class="orbit-group"><h4 style="color:${color}">${title} (${items.length})</h4><ul class="result-list">`;
-                items.slice(0, 15).forEach(n => {
-                    const isLocal = n.source === 'local';
-                    const label = n.label || 'unknown';
-                    const labelText = escHtml(label);
-                    const labelArg = JSON.stringify(label);
-                    const weight = (n.weight * 100).toFixed(0) + '%';
-                    const badge = isLocal 
-                        ? '<span class="badge badge-local" title="From local documents (σ-fact)">📄 σ</span>'
-                        : '<span class="badge badge-global" title="From global crystal (α-context)">🌐 α</span>';
-                    
-                    // Build location info with line number
-                    let locInfo = '';
-                    if (n.doc) {
-                        locInfo = n.doc;
-                        if (n.line) {
-                            locInfo += ':' + n.line;
-                        }
-                    }
-                    
-                    // Build tooltip with snippet
-                    let tooltip = isLocal ? 'Hover for context' : 'α-context from global crystal';
-                    
-                    // Add data attributes for lazy context loading
-                    const dataAttrs = (n.doc && n.line) 
-                        ? `data-doc="${escHtml(n.doc)}" data-line="${n.line}"`
-                        : '';
-                    
-                    group += `
-                        <li class="result-item ${isLocal ? 'local' : ''}" 
-                            onclick="searchWord(${labelArg})"
-                            title="${escHtml(tooltip)}"
-                            ${dataAttrs}>
-                            <span class="result-word">${labelText}</span>
-                            <span class="result-weight">${weight}${locInfo ? ' • ' + escHtml(locInfo) : ''}</span>
-                            ${badge}
-                        </li>
-                    `;
+	            const renderGroup = (items, title, color) => {
+	                if (items.length === 0) return '';
+	                let group = `<div class="orbit-group"><h4 style="color:${color}">${title} (${items.length})</h4><ul class="result-list">`;
+	                items.slice(0, 15).forEach(n => {
+	                    const isLocal = n.source === 'local';
+	                    const label = n.label || 'unknown';
+	                    const labelText = escHtml(label);
+                        const labelKey = encodeURIComponent(label);
+	                    const weight = (n.weight * 100).toFixed(0) + '%';
+	                    const badge = isLocal 
+	                        ? '<span class="badge badge-local" title="From local documents (σ-fact)">📄 σ</span>'
+	                        : '<span class="badge badge-global" title="From global crystal (α-context)">🌐 α</span>';
+	                    
+	                    // Build location info with line number
+	                    let locInfo = '';
+	                    if (n.doc) {
+	                        locInfo = n.doc;
+	                        if (n.line) {
+	                            locInfo += ':' + n.line;
+	                        }
+	                    }
+	                    
+	                    let tooltip = isLocal
+                            ? ((n.doc && n.line) ? 'Hover for context' : 'σ-edge (no provenance yet)')
+                            : 'α-context from global crystal';
+	                    
+	                    // Add data attributes for lazy context loading
+	                    const dataAttrs = (n.doc && n.line) 
+	                        ? `data-doc="${escHtml(n.doc)}" data-line="${n.line}" data-ctx-hash="${escHtml(n.ctx_hash || '')}"`
+	                        : '';
+	                    
+	                    group += `
+	                        <li class="result-item ${isLocal ? 'local' : ''}" 
+                                data-word="${labelKey}"
+	                            title="${escHtml(tooltip)}"
+	                            ${dataAttrs}>
+	                            <span class="result-word">${labelText}</span>
+	                            <span class="result-weight">${weight}${locInfo ? ' • ' + escHtml(locInfo) : ''}</span>
+	                            ${badge}
+	                        </li>
+	                    `;
+	                });
+	                group += '</ul></div>';
+	                return group;
+	            };
+            
+            html += renderGroup(core, '◼ Core (synonyms, 70%+)', 'var(--accent)');
+            html += renderGroup(near, '◻ Near (associations, 50-70%)', 'var(--text-2)');
+            html += renderGroup(far, '○ Far (context, <50%)', 'var(--text-3)');
+            
+	            html += '</div>';
+	            content.innerHTML = html;
+
+                // Click handlers (avoid inline JS quoting issues)
+                document.querySelectorAll('.result-item').forEach(item => {
+                    item.addEventListener('click', () => {
+                        const w = safeDecode(item.dataset.word || '');
+                        if (w) searchWord(w);
+                    });
                 });
-                group += '</ul></div>';
-                return group;
-            };
-            
-            html += renderGroup(core, '◼ Core (synonyms, 70%+)', '#58a6ff');
-            html += renderGroup(near, '◻ Near (associations, 50-70%)', '#8b949e');
-            html += renderGroup(far, '○ Far (context, <50%)', '#484f58');
-            
-            html += '</div>';
-            content.innerHTML = html;
-            
-            // Add hover handlers for lazy context loading
-            document.querySelectorAll('.result-item.local').forEach(item => {
-                item.addEventListener('mouseenter', async (e) => {
-                    const doc = item.dataset.doc;
-                    const line = item.dataset.line;
-                    if (doc && line) {
-                        await showContext(item, doc, line);
-                    }
-                });
-            });
-        }
+	            
+	            // Add hover handlers for lazy context loading
+	            document.querySelectorAll('.result-item.local').forEach(item => {
+	                item.addEventListener('mouseenter', async (e) => {
+	                    const doc = item.dataset.doc;
+	                    const line = item.dataset.line;
+                        const ctxHash = item.dataset.ctxHash;
+	                    if (doc && line) {
+	                        await showContext(item, doc, line, ctxHash);
+	                    }
+	                });
+	            });
+	        }
         
-        let contextCache = {};
-        let contextTooltip = null;
-        
-        async function showContext(element, doc, line) {
-            const key = doc + ':' + line;
-            
-            // Check cache
-            if (!contextCache[key]) {
-                try {
-                    const url = '/api/context?doc=' + encodeURIComponent(doc) + '&line=' + encodeURIComponent(line);
-                    const res = await fetch(url);
-                    const data = await res.json();
-                    if (data.content) {
-                        contextCache[key] = data;
-                    } else if (data.error) {
+	        let contextCache = {};
+	        let contextTooltip = null;
+            let ctxHideTimer = null;
+	        
+	        async function showContext(element, doc, line, ctxHash) {
+	            const key = doc + ':' + line + ':' + (ctxHash || '');
+	            
+	            // Check cache
+	            if (!contextCache[key]) {
+	                try {
+	                    let url = '/api/context?doc=' + encodeURIComponent(doc) + '&line=' + encodeURIComponent(line);
+                        if (ctxHash) url += '&ctx_hash=' + encodeURIComponent(ctxHash);
+	                    const res = await fetch(url);
+	                    const data = await res.json();
+	                    if (data.content) {
+	                        contextCache[key] = data;
+	                    } else if (data.error) {
                         contextCache[key] = { content: 'Error: ' + data.error };
                     }
                 } catch (e) {
@@ -867,45 +991,112 @@ HTML_PAGE = '''<!DOCTYPE html>
             if (!ctx || !ctx.content) return;
             
             // Create or update tooltip
-            if (!contextTooltip) {
-                contextTooltip = document.createElement('div');
-                contextTooltip.className = 'context-tooltip';
-                contextTooltip.style.cssText = `
-                    position: fixed;
-                    background: #161b22;
-                    border: 1px solid #30363d;
-                    border-radius: 8px;
-                    padding: 12px 16px;
-                    max-width: 500px;
-                    max-height: 200px;
-                    overflow: auto;
-                    font-family: monospace;
-                    font-size: 12px;
-                    color: #e6edf3;
-                    white-space: pre-wrap;
-                    word-break: break-word;
-                    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-                    z-index: 9999;
-                    pointer-events: none;
+	            if (!contextTooltip) {
+	                contextTooltip = document.createElement('div');
+	                contextTooltip.className = 'context-tooltip';
+	                contextTooltip.style.cssText = `
+	                    position: fixed;
+	                    background: var(--surface);
+	                    border: 1px solid var(--border);
+	                    border-radius: 8px;
+	                    padding: 12px 16px;
+	                    max-width: 500px;
+	                    max-height: 200px;
+	                    overflow: auto;
+	                    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	                    font-size: 12px;
+	                    color: var(--text);
+	                    white-space: pre-wrap;
+	                    word-break: break-word;
+	                    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+	                    z-index: 9999;
+	                    pointer-events: auto;
+	                `;
+                    contextTooltip.addEventListener('mouseenter', () => {
+                        if (ctxHideTimer) clearTimeout(ctxHideTimer);
+                    });
+                    contextTooltip.addEventListener('mouseleave', () => {
+                        hideContextTooltip();
+                    });
+	                document.body.appendChild(contextTooltip);
+	            }
+            
+	            // Position tooltip
+	            const rect = element.getBoundingClientRect();
+	            contextTooltip.style.left = (rect.left + 20) + 'px';
+	            contextTooltip.style.top = (rect.bottom + 8) + 'px';
+	            
+	            // Show content with header
+                const status = String(ctx.status || 'unchecked');
+                const statusText =
+                    status === 'fresh' ? '✓ σ-fresh' :
+                    status === 'relocated' ? '↔ σ-relocated' :
+                    status === 'broken' ? '✗ σ-broken' :
+                    '… unchecked';
+                const statusColor =
+                    status === 'fresh' ? 'var(--success)' :
+                    status === 'relocated' ? 'var(--warning)' :
+                    status === 'broken' ? 'var(--danger)' :
+                    'var(--text-2)';
+                const lineInfo = (ctx.actual_line && ctx.actual_line != ctx.requested_line)
+                    ? (ctx.requested_line + '→' + ctx.actual_line)
+                    : String(ctx.actual_line || ctx.requested_line || line);
+
+                const headerHtml = `
+                    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;">
+                        <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                            ${escHtml('📄 ' + doc + ':' + lineInfo)}
+                        </div>
+                        <div style="display:flex;gap:6px;flex-shrink:0;">
+                            <button type="button" data-open="vscode" style="background:rgba(255,255,255,0.03);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:4px 8px;font-size:11px;cursor:pointer;">VS Code</button>
+                            <button type="button" data-open="open" style="background:rgba(255,255,255,0.03);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:4px 8px;font-size:11px;cursor:pointer;">Open</button>
+                            <button type="button" data-open="reveal" style="background:rgba(255,255,255,0.03);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:4px 8px;font-size:11px;cursor:pointer;">Reveal</button>
+                        </div>
+                    </div>
+                    <div style="color:${statusColor};font-size:11px;margin-bottom:10px;">${escHtml(statusText)}</div>
                 `;
-                document.body.appendChild(contextTooltip);
-            }
-            
-            // Position tooltip
-            const rect = element.getBoundingClientRect();
-            contextTooltip.style.left = (rect.left + 20) + 'px';
-            contextTooltip.style.top = (rect.bottom + 8) + 'px';
-            
-            // Show content with header
-            const header = '📄 ' + doc + ':' + (ctx.block_start || line) + '-' + (ctx.block_end || line) + '\\n\\n';
-            contextTooltip.textContent = header + ctx.content;
-            contextTooltip.style.display = 'block';
-            
-            // Hide on mouse leave
-            element.addEventListener('mouseleave', () => {
+
+                const bodyHtml = `<div style="white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;line-height:1.45;">${escHtml(String(ctx.content || ''))}</div>`;
+	            contextTooltip.innerHTML = headerHtml + bodyHtml;
+	            contextTooltip.style.display = 'block';
+
+                contextTooltip.querySelectorAll('button[data-open]').forEach(btn => {
+                    btn.onclick = async (e) => {
+                        e.stopPropagation();
+                        const mode = btn.dataset.open;
+                        await openDoc(mode, doc, line, ctxHash);
+                    };
+                });
+	            
+	            // Hide on mouse leave
+	            element.addEventListener('mouseleave', () => {
+                    scheduleHideContext(150);
+	            }, { once: true });
+	        }
+
+            function hideContextTooltip() {
+                if (ctxHideTimer) clearTimeout(ctxHideTimer);
                 if (contextTooltip) contextTooltip.style.display = 'none';
-            }, { once: true });
-        }
+            }
+
+            function scheduleHideContext(ms) {
+                if (ctxHideTimer) clearTimeout(ctxHideTimer);
+                ctxHideTimer = setTimeout(() => {
+                    if (contextTooltip) contextTooltip.style.display = 'none';
+                }, ms || 150);
+            }
+
+            async function openDoc(mode, doc, line, ctxHash) {
+                try {
+                    let url = '/api/open?mode=' + encodeURIComponent(mode || 'open');
+                    url += '&doc=' + encodeURIComponent(doc);
+                    url += '&line=' + encodeURIComponent(line);
+                    if (ctxHash) url += '&ctx_hash=' + encodeURIComponent(ctxHash);
+                    await fetch(url);
+                } catch (e) {
+                    // ignore
+                }
+            }
         
         function searchWord(word) {
             queryInput.value = word;
@@ -936,7 +1127,7 @@ HTML_PAGE = '''<!DOCTYPE html>
 	                        <div class="empty">
 	                            <h3>✓ Document Added</h3>
 	                            <p>${data.anchors} concepts extracted, ${data.edges} connections created</p>
-	                            <p style="margin-top: 16px; color: #3fb950;">Selected: ${escHtml(file.name)}</p>
+	                            <p style="margin-top: 16px; color: var(--success);">Selected: ${escHtml(file.name)}</p>
 	                        </div>
 	                    `;
 	                }
@@ -980,4 +1171,3 @@ HTML_PAGE = '''<!DOCTYPE html>
 	</body>
 	</html>
 	'''
-
