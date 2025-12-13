@@ -32,26 +32,30 @@ RING_PRIORITY = {"eta": 0, "lambda": 1, "sigma": 2, "alpha": 3}
 @dataclass
 class OverlayEdge:
     """
-    Single edge in overlay with ring classification and provenance coordinates.
+    Single edge in overlay with ring classification and provenance.
     
     ring values:
       'sigma'  - Observation from document (default, σ-proof capable)
       'lambda' - Ghost edge from Halo (navigation only)
       'eta'    - LLM hypothesis (unverified)
     
-    Provenance (MDL-compliant - coordinates, not content):
-      'doc'     - Source document path
-      'line'    - Line number (1-indexed)
-      'span'    - Character span (start, end) for precise location
-      'snippet' - Human-readable hash (~10 words for visual verification)
+    Provenance (Anchor Integrity Protocol):
+      'doc'      - Source document path (pointer to reality)
+      'line'     - Line number (1-indexed, approximate coordinate)
+      'ctx_hash' - Semantic checksum of anchor window (8 hex chars)
+                   Hash of normalized anchor ±2 words for drift detection.
+                   
+    Self-Healing States (see INVARIANTS.md):
+      - σ-fresh: ctx_hash matches current file content
+      - σ-relocated: ctx_hash found at different line (coordinate updated)
+      - σ-broken: ctx_hash not found (source changed, fact unverifiable)
     """
     tgt: str  # target hash8
     weight: float
     doc: Optional[str] = None  # source document (provenance)
     ring: str = "sigma"  # sigma/lambda/eta
     line: Optional[int] = None  # line number (1-indexed)
-    span: Optional[Tuple[int, int]] = None  # (start_char, end_char)
-    snippet: Optional[str] = None  # short quote for human verification
+    ctx_hash: Optional[str] = None  # semantic checksum for drift detection
     
     def to_dict(self) -> Dict:
         d = {
@@ -62,19 +66,17 @@ class OverlayEdge:
         }
         if self.line is not None:
             d["line"] = self.line
-        if self.span is not None:
-            d["span"] = list(self.span)
-        if self.snippet is not None:
-            d["snippet"] = self.snippet
+        if self.ctx_hash is not None:
+            d["ctx_hash"] = self.ctx_hash
         return d
     
     def has_provenance(self) -> bool:
         """True if edge has document provenance (σ-proof capable)."""
         return self.ring == "sigma" and self.doc is not None
     
-    def has_coordinates(self) -> bool:
-        """True if edge has precise location (line or span)."""
-        return self.line is not None or self.span is not None
+    def has_integrity(self) -> bool:
+        """True if edge can be verified via ctx_hash (self-healing capable)."""
+        return self.ctx_hash is not None and self.line is not None
 
 
 @dataclass
@@ -156,14 +158,12 @@ class OverlayGraph:
             doc = entry.get("doc")
             ring = entry.get("ring", "sigma")  # default to sigma for backward compat
             line = entry.get("line")  # line number
-            span_raw = entry.get("span")  # [start, end] or None
-            span = tuple(span_raw) if span_raw and len(span_raw) == 2 else None
-            snippet = entry.get("snippet")  # short quote
+            ctx_hash = entry.get("ctx_hash")  # semantic checksum for integrity
             
             if src and tgt:
                 new_edge = OverlayEdge(
                     tgt=tgt, weight=weight, doc=doc, ring=ring,
-                    line=line, span=span, snippet=snippet
+                    line=line, ctx_hash=ctx_hash
                 )
                 # Check for conflicts (same src->tgt with different docs/weights)
                 existing = [e for e in self.edges[src] if e.tgt == tgt]
@@ -213,10 +213,8 @@ class OverlayGraph:
                         entry["doc"] = edge.doc
                     if edge.line is not None:
                         entry["line"] = edge.line
-                    if edge.span is not None:
-                        entry["span"] = list(edge.span)
-                    if edge.snippet:
-                        entry["snippet"] = edge.snippet
+                    if edge.ctx_hash:
+                        entry["ctx_hash"] = edge.ctx_hash
                     f.write(json.dumps(entry) + "\n")
             
             # Write suppressions
@@ -235,11 +233,10 @@ class OverlayGraph:
         doc: Optional[str] = None,
         ring: str = "sigma",
         line: Optional[int] = None,
-        span: Optional[Tuple[int, int]] = None,
-        snippet: Optional[str] = None,
+        ctx_hash: Optional[str] = None,
     ) -> None:
         """
-        Add a local edge with optional provenance coordinates.
+        Add a local edge with optional provenance (Anchor Integrity Protocol).
         
         Args:
             src: Source hash8
@@ -247,13 +244,13 @@ class OverlayGraph:
             weight: Edge weight (typically 1.0 for facts)
             doc: Source document path (provenance for σ-proof)
             ring: 'sigma' (default), 'lambda', or 'eta'
-            line: Line number (1-indexed) for deep link
-            span: Character span (start, end) for precise location
-            snippet: Short quote (~10 words) for human verification
+            line: Line number (1-indexed) — approximate coordinate
+            ctx_hash: Semantic checksum of anchor window (8 hex chars)
+                      Used for drift detection and self-healing.
         """
         new_edge = OverlayEdge(
             tgt=tgt, weight=weight, doc=doc, ring=ring,
-            line=line, span=span, snippet=snippet
+            line=line, ctx_hash=ctx_hash
         )
         # Check for conflicts
         existing = [e for e in self.edges[src] if e.tgt == tgt]

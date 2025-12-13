@@ -65,33 +65,37 @@ def tokenize_with_positions(text: str) -> List[tuple]:
     return results
 
 
-def get_snippet(text: str, char_start: int, char_end: int, context: int = 30) -> str:
+def compute_ctx_hash(tokens_with_pos: List[tuple], anchor_idx: int, k: int = 2) -> str:
     """
-    Extract snippet around a character span.
+    Compute semantic checksum for anchor (Anchor Integrity Protocol).
     
-    Returns ~10 words of context, with the target highlighted.
+    Args:
+        tokens_with_pos: List of (word, line, char_start, char_end)
+        anchor_idx: Index of anchor word in the list
+        k: Window size (±k words around anchor)
+    
+    Returns:
+        8 hex characters of SHA-256 hash of normalized anchor window
+    
+    Theory: This is the "DNA" of the σ-fact. If context changes, hash changes.
+    Used for drift detection and self-healing.
     """
-    # Get context before and after
-    start = max(0, char_start - context)
-    end = min(len(text), char_end + context)
+    import hashlib
     
-    snippet = text[start:end]
+    # Get window [anchor_idx - k, anchor_idx + k]
+    start = max(0, anchor_idx - k)
+    end = min(len(tokens_with_pos), anchor_idx + k + 1)
     
-    # Clean up to word boundaries
-    if start > 0:
-        first_space = snippet.find(' ')
-        if first_space > 0:
-            snippet = '...' + snippet[first_space+1:]
+    # Extract words
+    window_words = [tokens_with_pos[i][0] for i in range(start, end)]
     
-    if end < len(text):
-        last_space = snippet.rfind(' ')
-        if last_space > 0:
-            snippet = snippet[:last_space] + '...'
+    # Normalize: lowercase, join with single space
+    normalized = ' '.join(w.lower() for w in window_words)
     
-    # Clean whitespace
-    snippet = ' '.join(snippet.split())
+    # Hash and truncate to 8 hex chars
+    h = hashlib.sha256(normalized.encode('utf-8')).hexdigest()[:8]
     
-    return snippet
+    return h
 
 
 def get_anchors(
@@ -211,30 +215,38 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         # Create edges between consecutive anchors with provenance coordinates
         doc_name = str(file_path.relative_to(input_path) if input_path.is_dir() else file_path.name)
         
-        for i in range(len(anchor_tokens) - 1):
-            src_word, src_line, src_cs, src_ce = anchor_tokens[i]
-            tgt_word, tgt_line, tgt_cs, tgt_ce = anchor_tokens[i + 1]
+        # Build index map: anchor token index -> position in tokens_with_pos
+        anchor_indices = []
+        for i, (w, _, _, _) in enumerate(tokens_with_pos):
+            if w in anchor_words:
+                anchor_indices.append(i)
+        
+        for i in range(len(anchor_indices) - 1):
+            src_idx = anchor_indices[i]
+            tgt_idx = anchor_indices[i + 1]
+            
+            src_word, src_line, _, _ = tokens_with_pos[src_idx]
+            tgt_word, tgt_line, _, _ = tokens_with_pos[tgt_idx]
             
             src_hash = hash8_hex(f"Ġ{src_word}")
             tgt_hash = hash8_hex(f"Ġ{tgt_word}")
             
-            # Create snippet that spans both words (for human verification)
-            snippet = get_snippet(text, src_cs, tgt_ce, context=20)
+            # Compute ctx_hash for target anchor (hash of word ±2 words)
+            ctx_hash = compute_ctx_hash(tokens_with_pos, tgt_idx, k=2)
             
             overlay.add_edge(
                 src_hash, tgt_hash, 
                 weight=1.0, 
                 doc=doc_name,
                 ring="sigma",
-                line=src_line,
-                span=(src_cs, tgt_ce),
-                snippet=snippet
+                line=tgt_line,  # Line of target anchor
+                ctx_hash=ctx_hash
             )
             overlay.define_label(src_hash, src_word)
             overlay.define_label(tgt_hash, tgt_word)
             total_edges += 1
         
-        print(f"  Added {len(anchor_tokens) - 1} edges with provenance")
+        print(f"  Added {len(anchor_indices) - 1} edges with integrity")
     
     # Save overlay
     output_path.parent.mkdir(parents=True, exist_ok=True)
