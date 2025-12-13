@@ -1443,6 +1443,8 @@ class UIHandler(BaseHTTPRequestHandler):
             top: 50%;
             transform-style: preserve-3d;
             will-change: transform;
+            --invrx: 0deg;
+            --invry: 0deg;
         }
         .word {
             position: absolute;
@@ -1454,16 +1456,24 @@ class UIHandler(BaseHTTPRequestHandler):
             user-select: none;
             font-weight: 600;
             text-shadow: 0 2px 12px rgba(0,0,0,0.85);
-            transition: opacity 0.12s, transform 0.12s;
+            transition: opacity 0.12s;
+            will-change: transform;
+            transform: translate3d(var(--x, 0px), var(--y, 0px), var(--z, 0px)) translate(-50%, -50%);
         }
         .word.anchor {
             font-weight: 800;
             text-shadow: 0 0 18px currentColor, 0 2px 12px rgba(0,0,0,0.85);
         }
-        .word.dim { opacity: 0.12; }
-        .word:hover {
-            z-index: 10000;
-            transform: translate3d(var(--x), var(--y), var(--z)) rotateY(var(--invry)) rotateX(var(--invrx)) translate(-50%, -50%) scale(1.25);
+        #cloud.focus .word { opacity: 0.12; }
+        #cloud.focus .word.active { opacity: 1; }
+        .label {
+            display: inline-block;
+            transform: rotateY(var(--invry)) rotateX(var(--invrx));
+            transform-origin: center;
+            will-change: transform;
+        }
+        .word:hover .label {
+            transform: rotateY(var(--invry)) rotateX(var(--invrx)) scale(1.25);
         }
         #hud {
             position: fixed;
@@ -1583,18 +1593,21 @@ class UIHandler(BaseHTTPRequestHandler):
         nodes.forEach(n => {
             const el = document.createElement('div');
             el.className = 'word';
-            el.textContent = n.label || n.id.slice(0, 8);
+            const labelEl = document.createElement('span');
+            labelEl.className = 'label';
+            labelEl.textContent = n.label || n.id.slice(0, 8);
+            el.appendChild(labelEl);
             if (n.phase === 'solid') el.classList.add('anchor');
 
             const mass = Math.max(0, +n.mass || 0);
-            el.style.fontSize = (12 + mass * 40) + 'px';
-            el.style.color = tempColor(normTemp(n));
+            labelEl.style.fontSize = (12 + mass * 40) + 'px';
+            labelEl.style.color = tempColor(normTemp(n));
 
             el.addEventListener('mousemove', (e) => {
                 tooltip.style.left = (e.clientX + 14) + 'px';
                 tooltip.style.top = (e.clientY + 14) + 'px';
             });
-            el.addEventListener('mouseenter', () => onHover(n.id));
+            el.addEventListener('mouseenter', (e) => onHover(n.id, e));
             el.addEventListener('mouseleave', () => onHover(null));
             el.addEventListener('click', () => {
                 window.location.href = '/?q=' + encodeURIComponent(n.label || '');
@@ -1604,17 +1617,28 @@ class UIHandler(BaseHTTPRequestHandler):
             els.set(n.id, el);
         });
 
-        // View rotation (camera): rotate the whole cloud, but cancel rotation on each word (billboard).
+        // View transform (camera): rotate + pan + zoom.
         let rotX = -18;
         let rotY = 24;
-        let dragging = false;
+        let panX = 0;
+        let panY = 0;
+        let zoomZ = 0;
+        let pointerId = null;
+        let dragMode = null; // 'rotate' | 'pan'
         let lastX = 0;
         let lastY = 0;
         let autoRotate = true;
+        let lastInteractionAt = 0;
         const scene = document.getElementById('scene');
 
+        function noteInteraction() {
+            lastInteractionAt = performance.now();
+        }
+
         function updateView() {
-            cloud.style.transform = `rotateX(${rotX}deg) rotateY(${rotY}deg)`;
+            cloud.style.transform = `translate3d(${panX}px, ${panY}px, ${zoomZ}px) rotateX(${rotX}deg) rotateY(${rotY}deg)`;
+            cloud.style.setProperty('--invrx', (-rotX) + 'deg');
+            cloud.style.setProperty('--invry', (-rotY) + 'deg');
         }
         updateView();
 
@@ -1642,19 +1666,34 @@ class UIHandler(BaseHTTPRequestHandler):
         }
 
         let hovered = null;
-        function onHover(id) {
+        let activeIds = new Set();
+        function setActive(newIds) {
+            activeIds.forEach(id => {
+                const el = els.get(id);
+                if (el) el.classList.remove('active');
+            });
+            activeIds = newIds;
+            activeIds.forEach(id => {
+                const el = els.get(id);
+                if (el) el.classList.add('active');
+            });
+        }
+        function onHover(id, e) {
+            noteInteraction();
             hovered = id ? byId.get(id) : null;
             setHud(hovered);
             if (!hovered) {
                 tooltip.classList.remove('visible');
-                els.forEach(el => el.classList.remove('dim'));
+                cloud.classList.remove('focus');
+                setActive(new Set());
                 return;
             }
+            cloud.classList.add('focus');
             const nb = neigh.get(id) || new Set();
-            els.forEach((el, nid) => {
-                if (nid === id || nb.has(nid)) el.classList.remove('dim');
-                else el.classList.add('dim');
-            });
+            const next = new Set([id]);
+            nb.forEach(x => next.add(x));
+            setActive(next);
+
             tooltip.innerHTML = `
                 <div class="t">${hovered.label}</div>
                 <div class="s">mass: ${(hovered.mass || 0).toFixed(4)} | phase: ${hovered.phase}</div>
@@ -1662,6 +1701,7 @@ class UIHandler(BaseHTTPRequestHandler):
                 <div class="s">temp: ${normTemp(hovered).toFixed(3)}</div>
             `;
             tooltip.classList.add('visible');
+            if (e) positionTooltip(e);
         }
 
         // Force simulation (3D): weight controls spring (gravity), mass controls repulsion.
@@ -1691,76 +1731,99 @@ class UIHandler(BaseHTTPRequestHandler):
             .alpha(1)
             .alphaDecay(0.03);
 
-        let needsRender = true;
-        const markRender = () => { needsRender = true; };
-        simulation.on('tick', markRender);
-        simulation.on('end', markRender);
-
-        function render() {
-            if (autoRotate && !dragging) {
-                rotY += 0.12;
-                updateView();
-                needsRender = true;
-            }
-
-            if (needsRender) {
-                const invrx = (-rotX) + 'deg';
-                const invry = (-rotY) + 'deg';
+        // Render node positions only when physics updates (not every frame).
+        let posRaf = null;
+        function schedulePosRender() {
+            if (posRaf) return;
+            posRaf = requestAnimationFrame(() => {
+                posRaf = null;
                 simNodes.forEach(n => {
                     const el = els.get(n.id);
                     if (!el) return;
-                    const x = `${n.x.toFixed(2)}px`;
-                    const y = `${n.y.toFixed(2)}px`;
-                    const z = `${n.z.toFixed(2)}px`;
-                    el.style.setProperty('--x', x);
-                    el.style.setProperty('--y', y);
-                    el.style.setProperty('--z', z);
-                    el.style.setProperty('--invrx', invrx);
-                    el.style.setProperty('--invry', invry);
-                    el.style.transform = `translate3d(${x}, ${y}, ${z}) rotateY(${invry}) rotateX(${invrx}) translate(-50%, -50%)`;
+                    el.style.setProperty('--x', `${n.x.toFixed(2)}px`);
+                    el.style.setProperty('--y', `${n.y.toFixed(2)}px`);
+                    el.style.setProperty('--z', `${n.z.toFixed(2)}px`);
                 });
-                needsRender = false;
-            }
-
-            requestAnimationFrame(render);
+            });
         }
-        requestAnimationFrame(render);
+        simulation.on('tick', () => {
+            schedulePosRender();
+            // Stop when cold to reduce CPU.
+            if (simulation.alpha() < 0.035) simulation.stop();
+        });
+        schedulePosRender();
 
-        // Drag to rotate the view (camera).
-        scene.addEventListener('mousedown', (e) => {
-            dragging = true;
+        function animate() {
+            const now = performance.now();
+            const idle = (now - lastInteractionAt) > 900;
+            const canAutoRotate = autoRotate && idle && !hovered && pointerId === null;
+            if (canAutoRotate) {
+                rotY += 0.08;
+                updateView();
+            }
+            requestAnimationFrame(animate);
+        }
+        requestAnimationFrame(animate);
+
+        // Pointer controls: left drag = rotate, right/shift drag = pan, wheel = zoom.
+        scene.addEventListener('contextmenu', (e) => e.preventDefault());
+        scene.addEventListener('pointerdown', (e) => {
+            noteInteraction();
+            pointerId = e.pointerId;
+            dragMode = (e.button === 2 || e.button === 1 || e.shiftKey) ? 'pan' : 'rotate';
             lastX = e.clientX;
             lastY = e.clientY;
+            scene.setPointerCapture(pointerId);
         });
-        window.addEventListener('mouseup', () => { dragging = false; });
-        window.addEventListener('mousemove', (e) => {
-            if (!dragging) return;
+        scene.addEventListener('pointerup', (e) => {
+            if (pointerId !== e.pointerId) return;
+            pointerId = null;
+            dragMode = null;
+        });
+        scene.addEventListener('pointermove', (e) => {
+            if (tooltip.classList.contains('visible')) positionTooltip(e);
+            if (pointerId !== e.pointerId || !dragMode) {
+                noteInteraction();
+                return;
+            }
+            noteInteraction();
             const dx = e.clientX - lastX;
             const dy = e.clientY - lastY;
             lastX = e.clientX;
             lastY = e.clientY;
-            rotY += dx * 0.25;
-            rotX -= dy * 0.25;
-            rotX = Math.max(-85, Math.min(85, rotX));
+            if (dragMode === 'rotate') {
+                rotY += dx * 0.25;
+                rotX -= dy * 0.25;
+                rotX = Math.max(-85, Math.min(85, rotX));
+            } else {
+                panX += dx;
+                panY += dy;
+            }
             updateView();
-            markRender();
-            if (hovered) positionTooltip(e);
         });
-        window.addEventListener('mousemove', (e) => {
-            if (tooltip.classList.contains('visible')) positionTooltip(e);
-        });
+        scene.addEventListener('wheel', (e) => {
+            e.preventDefault();
+            noteInteraction();
+            zoomZ += (-e.deltaY) * 0.8;
+            zoomZ = Math.max(-2000, Math.min(800, zoomZ));
+            updateView();
+        }, { passive: false });
 
         document.getElementById('toggleRotate').onclick = () => {
             autoRotate = !autoRotate;
             document.getElementById('toggleRotate').classList.toggle('active', autoRotate);
+            noteInteraction();
         };
         document.getElementById('resetView').onclick = () => {
             rotX = -18;
             rotY = 24;
+            panX = 0;
+            panY = 0;
+            zoomZ = 0;
             autoRotate = true;
             document.getElementById('toggleRotate').classList.add('active');
             updateView();
-            markRender();
+            noteInteraction();
         };
 
     })();
