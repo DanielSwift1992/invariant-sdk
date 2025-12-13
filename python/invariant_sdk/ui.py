@@ -971,67 +971,181 @@ class UIHandler(BaseHTTPRequestHandler):
             border-radius: 8px;
             border: 1px solid #30363d;
             z-index: 100;
-            max-width: 280px;
+            max-width: 320px;
         }}
-        #info h2 {{ color: #58a6ff; margin-bottom: 12px; font-size: 18px; }}
+        #info h2 {{ color: #58a6ff; margin-bottom: 8px; font-size: 18px; }}
         #info p {{ font-size: 12px; color: #8b949e; margin: 4px 0; }}
         #info a {{ color: #58a6ff; }}
-        .legend {{ display: flex; gap: 12px; margin-top: 12px; font-size: 11px; }}
+        .controls {{ margin-top: 12px; display: flex; flex-wrap: wrap; gap: 6px; }}
+        .controls button {{
+            padding: 6px 10px;
+            font-size: 11px;
+            background: #21262d;
+            border: 1px solid #30363d;
+            color: #e6edf3;
+            border-radius: 4px;
+            cursor: pointer;
+        }}
+        .controls button:hover {{ background: #30363d; }}
+        .controls button.active {{ background: #238636; border-color: #238636; }}
+        .legend {{ display: flex; gap: 12px; margin-top: 10px; font-size: 11px; }}
         .legend span {{ display: flex; align-items: center; gap: 4px; }}
         .dot {{ width: 10px; height: 10px; border-radius: 50%; }}
+        .stats {{ font-size: 11px; color: #484f58; margin-top: 8px; padding-top: 8px; border-top: 1px solid #21262d; }}
     </style>
 </head>
 <body>
     <div id="info">
         <h2>◆ 3D Knowledge Graph</h2>
-        <p>Nodes: <strong>{node_count}</strong> | Edges: <strong>{edge_count}</strong></p>
-        <p style="margin-top: 8px; font-size: 11px; color: #484f58;">
-            🖱️ Drag to rotate | Scroll to zoom | Click node to search
-        </p>
-        <div class="legend">
-            <span><div class="dot" style="background:#58a6ff"></div> Solid (anchor)</span>
-            <span><div class="dot" style="background:#484f58"></div> Gas (common)</span>
+        <p id="stats">Loading...</p>
+        
+        <div class="controls">
+            <button onclick="toggleAnchorsOnly()" id="btnAnchors">◆ Anchors Only</button>
+            <button onclick="toggleLabels()" id="btnLabels" class="active">📝 Labels</button>
+            <button onclick="toggleRotate()" id="btnRotate" class="active">🔄 Rotate</button>
+            <button onclick="resetView()">⟳ Reset</button>
         </div>
+        
+        <div class="legend">
+            <span><div class="dot" style="background:#58a6ff"></div> Large = High Mass (anchor)</span>
+        </div>
+        <div class="legend">
+            <span><div class="dot" style="background:#484f58"></div> Small = Low Mass (common)</span>
+        </div>
+        
         <p style="margin-top: 12px;">
             <a href="/graph">2D View</a> | <a href="/">Search</a>
         </p>
+        
+        <div class="stats">
+            💡 Size = Information Content (Mass)<br>
+            📐 Position = Semantic Similarity
+        </div>
     </div>
     
     <div id="graph3d"></div>
     
     <script>
+        let Graph;
+        let allData;
+        let showAnchorsOnly = false;
+        let showLabels = true;
+        let autoRotate = true;
+        
         fetch('/api/graph')
             .then(res => res.json())
             .then(data => {{
-                const Graph = ForceGraph3D()
-                    (document.getElementById('graph3d'))
-                    .backgroundColor('#0d1117')
-                    .graphData({{
-                        nodes: data.nodes,
-                        links: data.edges.map(e => ({{
-                            source: e.source,
-                            target: e.target,
-                            value: e.weight
-                        }}))
-                    }})
-                    .nodeLabel(n => `${{n.label}}\\nMass: ${{n.mass.toFixed(3)}}\\nPhase: ${{n.phase}}`)
-                    .nodeVal(n => Math.sqrt(n.mass) * 10 + 2)
-                    .nodeColor(n => n.phase === 'solid' ? '#58a6ff' : '#484f58')
-                    .nodeOpacity(0.9)
-                    .linkWidth(l => l.value * 2 + 0.5)
-                    .linkOpacity(0.4)
-                    .linkColor(() => '#30363d')
-                    .onNodeClick(n => {{
-                        window.location.href = '/?q=' + encodeURIComponent(n.label);
-                    }})
-                    .d3Force('charge', d3.forceManyBody().strength(n => -n.mass * 200))
-                    .d3Force('link', d3.forceLink().distance(50).strength(l => l.value * 0.3));
+                allData = data;
                 
-                // Auto-rotate slowly
-                Graph.controls().autoRotate = true;
-                Graph.controls().autoRotateSpeed = 0.5;
+                // Stats
+                const solidCount = data.nodes.filter(n => n.phase === 'solid').length;
+                const gasCount = data.nodes.length - solidCount;
+                document.getElementById('stats').innerHTML = 
+                    `<strong>${{data.nodes.length}}</strong> nodes (<span style="color:#58a6ff">${{solidCount}} anchors</span>, ${{gasCount}} common) | <strong>${{data.edges.length}}</strong> edges`;
+                
+                renderGraph(data);
             }});
+        
+        function renderGraph(data) {{
+            const container = document.getElementById('graph3d');
+            container.innerHTML = '';
+            
+            Graph = ForceGraph3D()
+                (container)
+                .backgroundColor('#0d1117')
+                .graphData({{
+                    nodes: data.nodes,
+                    links: data.edges.map(e => ({{
+                        source: e.source,
+                        target: e.target,
+                        value: e.weight
+                    }}))
+                }})
+                // SIZE: Mass determines size (bigger = more information)
+                .nodeVal(n => {{
+                    const baseSize = n.phase === 'solid' ? 8 : 2;
+                    return baseSize + (n.mass * 15);
+                }})
+                // COLOR: Phase + degree for cluster hint
+                .nodeColor(n => {{
+                    if (n.phase === 'solid') {{
+                        // Anchors: blue intensity by degree
+                        const intensity = Math.min(255, 100 + n.degree * 10);
+                        return `rgb(${{50}}, ${{intensity}}, 255)`;
+                    }} else {{
+                        // Gas: gray, dimmer
+                        return '#484f58';
+                    }}
+                }})
+                .nodeOpacity(n => n.phase === 'solid' ? 1 : 0.6)
+                // LABELS: Only for solid nodes (anchors)
+                .nodeThreeObject(n => {{
+                    if (!showLabels || n.phase !== 'solid') return null;
+                    
+                    const sprite = new SpriteText(n.label);
+                    sprite.color = '#e6edf3';
+                    sprite.textHeight = 3 + n.mass * 5;
+                    sprite.backgroundColor = 'rgba(13, 17, 23, 0.8)';
+                    sprite.padding = 1;
+                    sprite.borderRadius = 2;
+                    return sprite;
+                }})
+                .nodeThreeObjectExtend(true)
+                // LINKS
+                .linkWidth(l => 0.5 + l.value * 1.5)
+                .linkOpacity(0.3)
+                .linkColor(() => '#30363d')
+                // INTERACTION
+                .onNodeClick(n => {{
+                    window.location.href = '/?q=' + encodeURIComponent(n.label);
+                }})
+                .onNodeHover(n => {{
+                    container.style.cursor = n ? 'pointer' : 'default';
+                }})
+                // PHYSICS: Mass affects repulsion (information spreads)
+                .d3Force('charge', d3.forceManyBody().strength(n => {{
+                    return n.phase === 'solid' ? -n.mass * 300 : -50;
+                }}))
+                .d3Force('link', d3.forceLink().distance(60).strength(l => l.value * 0.4));
+            
+            // Auto-rotate
+            Graph.controls().autoRotate = autoRotate;
+            Graph.controls().autoRotateSpeed = 0.3;
+        }}
+        
+        function toggleAnchorsOnly() {{
+            showAnchorsOnly = !showAnchorsOnly;
+            document.getElementById('btnAnchors').classList.toggle('active', showAnchorsOnly);
+            
+            if (showAnchorsOnly) {{
+                const solidNodes = allData.nodes.filter(n => n.phase === 'solid');
+                const solidIds = new Set(solidNodes.map(n => n.id));
+                const filteredEdges = allData.edges.filter(e => 
+                    solidIds.has(e.source) && solidIds.has(e.target)
+                );
+                renderGraph({{ nodes: solidNodes, edges: filteredEdges }});
+            }} else {{
+                renderGraph(allData);
+            }}
+        }}
+        
+        function toggleLabels() {{
+            showLabels = !showLabels;
+            document.getElementById('btnLabels').classList.toggle('active', showLabels);
+            Graph.nodeThreeObject(Graph.nodeThreeObject()); // Refresh
+        }}
+        
+        function toggleRotate() {{
+            autoRotate = !autoRotate;
+            document.getElementById('btnRotate').classList.toggle('active', autoRotate);
+            Graph.controls().autoRotate = autoRotate;
+        }}
+        
+        function resetView() {{
+            Graph.cameraPosition({{ x: 0, y: 0, z: 500 }}, {{ x: 0, y: 0, z: 0 }}, 1000);
+        }}
     </script>
+    <script src="https://unpkg.com/three-spritetext"></script>
 </body>
 </html>'''
         self.send_html(graph3d_html)
