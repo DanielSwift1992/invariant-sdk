@@ -1539,6 +1539,7 @@ class UIHandler(BaseHTTPRequestHandler):
         <div class="row" style="margin-top: 10px;">
             <span>Size</span>=Mass • <span>Color</span>=Temperature • <span>Distance</span>=Gravity
         </div>
+        <div class="row">Drag=Rotate • Shift/Right=Pan • Wheel=Zoom</div>
         <div class="row" style="margin-top: 8px;"><a href="/">Search</a> | <a href="/cloud">Cloud</a> | <a href="/graph">Graph</a></div>
     </div>
     <div id="tooltip"></div>
