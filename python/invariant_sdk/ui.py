@@ -72,6 +72,76 @@ HTML_PAGE = '''<!DOCTYPE html>
             color: #8b949e;
             margin-bottom: 32px;
         }
+
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 14px;
+        }
+
+        .toolbar-left {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .toolbar-label {
+            font-size: 12px;
+            color: #8b949e;
+        }
+
+        .doc-select {
+            padding: 10px 12px;
+            font-size: 13px;
+            background: #161b22;
+            border: 1px solid #30363d;
+            border-radius: 8px;
+            color: #e6edf3;
+        }
+
+        .doc-link {
+            font-size: 12px;
+            color: #58a6ff;
+            text-decoration: none;
+        }
+
+        .doc-link:hover { text-decoration: underline; }
+
+        .graph-preview {
+            margin-top: 16px;
+            border: 1px solid #21262d;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #0d1117;
+        }
+
+        .graph-preview-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            background: #161b22;
+            border-bottom: 1px solid #21262d;
+            font-size: 12px;
+            color: #8b949e;
+        }
+
+        .graph-preview-header a {
+            color: #58a6ff;
+            text-decoration: none;
+        }
+
+        .graph-preview-header a:hover { text-decoration: underline; }
+
+        .graph-frame {
+            width: 100%;
+            height: 340px;
+            border: 0;
+            background: #0d1117;
+        }
         
         .search-form {
             display: flex;
@@ -359,14 +429,24 @@ HTML_PAGE = '''<!DOCTYPE html>
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>◆ Invariant</h1>
-        <p class="subtitle">Semantic Knowledge Explorer</p>
-        
-        <div class="search-form">
-            <div class="search-wrapper">
-                <input type="text" class="search-input" id="query" 
-                       placeholder="Type to search... (suggestions will appear)" autofocus
+	    <div class="container">
+	        <h1>◆ Invariant</h1>
+	        <p class="subtitle">Semantic Knowledge Explorer</p>
+	        
+	        <div class="toolbar">
+	            <div class="toolbar-left">
+	                <span class="toolbar-label">Document</span>
+	                <select id="docSelect" class="doc-select">
+	                    <option value="">All documents</option>
+	                </select>
+	                <a id="docLink" class="doc-link" href="/doc">Open</a>
+	            </div>
+	        </div>
+	        
+	        <div class="search-form">
+	            <div class="search-wrapper">
+	                <input type="text" class="search-input" id="query" 
+	                       placeholder="Type to search... (suggestions will appear)" autofocus
                        oninput="handleInput(this.value)" autocomplete="off">
                 <div class="autocomplete" id="autocomplete"></div>
             </div>
@@ -395,19 +475,50 @@ HTML_PAGE = '''<!DOCTYPE html>
         </div>
     </div>
     
-    <div class="status-bar">
-        <span>Crystal: <strong>$$CRYSTAL_ID$$</strong></span>
-        <span><a href="/cloud" style="color:#58a6ff">☁️ Cloud</a> | <a href="/graph" style="color:#58a6ff">📊 2D</a> | <a href="/graph3d" style="color:#58a6ff">🌐 3D</a></span>
-        <span class="status-local">$$OVERLAY_STATUS$$</span>
-    </div>
+	    <div class="status-bar">
+	        <span>Crystal: <strong>$$CRYSTAL_ID$$</strong></span>
+	        <span><a href="/doc" style="color:#58a6ff">📄 Docs</a> | <a href="/cloud" style="color:#58a6ff">☁️ Cloud</a> | <a href="/graph" style="color:#58a6ff">📊 Graph</a> | <a href="/graph3d" style="color:#58a6ff">🧬 3D</a></span>
+	        <span class="status-local">$$OVERLAY_STATUS$$</span>
+	    </div>
 
-    <script>
-        const queryInput = document.getElementById('query');
-        const searchBtn = document.getElementById('searchBtn');
-        const content = document.getElementById('content');
-        const autocomplete = document.getElementById('autocomplete');
-        
-        let debounceTimer;
+	    <script>
+	        const queryInput = document.getElementById('query');
+	        const searchBtn = document.getElementById('searchBtn');
+	        const content = document.getElementById('content');
+	        const autocomplete = document.getElementById('autocomplete');
+	        const docSelect = document.getElementById('docSelect');
+	        const docLink = document.getElementById('docLink');
+	        
+	        let selectedDoc = '';
+	        
+	        let debounceTimer;
+
+	        function setSelectedDoc(doc) {
+	            selectedDoc = (doc || '').trim();
+	            if (docSelect) docSelect.value = selectedDoc;
+	            try { localStorage.setItem('inv_doc', selectedDoc); } catch (e) {}
+	            if (docLink) {
+	                docLink.href = selectedDoc ? ('/doc?doc=' + encodeURIComponent(selectedDoc)) : '/doc';
+	            }
+	        }
+
+	        async function loadDocs() {
+	            try {
+	                const res = await fetch('/api/docs');
+	                const data = await res.json();
+	                const docs = data.docs || [];
+	                let html = '<option value="">All documents</option>';
+	                docs.forEach(d => {
+	                    html += `<option value="${d.doc}">${d.doc} (${d.edges} edges)</option>`;
+	                });
+	                docSelect.innerHTML = html;
+	                if (selectedDoc) {
+	                    docSelect.value = selectedDoc;
+	                }
+	            } catch (e) {
+	                // ignore
+	            }
+	        }
         
         function handleInput(value) {
             clearTimeout(debounceTimer);
@@ -460,27 +571,38 @@ HTML_PAGE = '''<!DOCTYPE html>
             }
         });
         
-        queryInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter') {
-                autocomplete.classList.remove('show');
-                search();
-            }
-        });
+	        queryInput.addEventListener('keypress', (e) => {
+	            if (e.key === 'Enter') {
+	                autocomplete.classList.remove('show');
+	                search();
+	            }
+	        });
+
+	        if (docSelect) {
+	            docSelect.addEventListener('change', () => {
+	                setSelectedDoc(docSelect.value);
+	                if (queryInput.value.trim()) search();
+	            });
+	        }
         
-        async function search() {
-            const q = queryInput.value.trim();
-            if (!q) return;
+	        async function search() {
+	            const q = queryInput.value.trim();
+	            if (!q) return;
             
             searchBtn.disabled = true;
             content.innerHTML = '<div class="loading"><span class="spinner"></span>Searching...</div>';
             
-            try {
-                const res = await fetch('/api/search?q=' + encodeURIComponent(q));
-                const data = await res.json();
-                
-                if (data.error) {
-                    content.innerHTML = '<div class="empty"><h3>Error</h3><p>' + data.error + '</p></div>';
-                    return;
+	            try {
+	                let url = '/api/search?q=' + encodeURIComponent(q);
+	                if (selectedDoc) {
+	                    url += '&doc=' + encodeURIComponent(selectedDoc);
+	                }
+	                const res = await fetch(url);
+	                const data = await res.json();
+	                
+	                if (data.error) {
+	                    content.innerHTML = '<div class="empty"><h3>Error</h3><p>' + data.error + '</p></div>';
+	                    return;
                 }
                 
                 renderResults(data);
@@ -491,29 +613,47 @@ HTML_PAGE = '''<!DOCTYPE html>
             }
         }
         
-        function renderResults(data) {
-            if (!data.neighbors || data.neighbors.length === 0) {
-                content.innerHTML = '<div class="empty"><h3>No connections found</h3><p>Try a different word</p></div>';
-                return;
-            }
-            
-            const localCount = data.neighbors.filter(n => n.source === 'local').length;
-            const globalCount = data.neighbors.length - localCount;
-            
-            let html = `
-                <div class="results">
-                    <div class="result-header">
-                        <h2>
-                            ${data.phase === 'solid' ? '◆' : '○'} "${data.query}"
-                            <span class="phase-badge ${data.phase}">${data.phase === 'solid' ? 'ANCHOR' : 'common'}</span>
-                        </h2>
-                        <div class="result-meta">
-                            <span>Mode: ${data.mode}</span>
-                            <span>Mass: ${(data.mass || 0).toFixed(2)}</span>
-                            <span>${localCount} local, ${globalCount} global</span>
-                        </div>
-                    </div>
-            `;
+	        function renderResults(data) {
+	            if (!data.neighbors || data.neighbors.length === 0) {
+	                content.innerHTML = '<div class="empty"><h3>No connections found</h3><p>Try a different word</p></div>';
+	                return;
+	            }
+	            
+	            const localCount = data.neighbors.filter(n => n.source === 'local').length;
+	            const globalCount = data.neighbors.length - localCount;
+	            const focus = Array.isArray(data.atoms) && data.atoms.length ? data.atoms[0] : '';
+	            
+	            let miniSrc = '/graph3d?embed=1';
+	            if (selectedDoc) miniSrc += '&doc=' + encodeURIComponent(selectedDoc);
+	            if (focus) miniSrc += '&focus=' + encodeURIComponent(focus) + '&radius=1&max_nodes=180';
+	            
+	            let fullHref = '/graph3d';
+	            const qs = [];
+	            if (selectedDoc) qs.push('doc=' + encodeURIComponent(selectedDoc));
+	            if (focus) qs.push('focus=' + encodeURIComponent(focus) + '&radius=2');
+	            if (qs.length) fullHref += '?' + qs.join('&');
+	            
+	            let html = `
+	                <div class="results">
+	                    <div class="result-header">
+	                        <h2>
+	                            ${data.phase === 'solid' ? '◆' : '○'} "${data.query}"
+	                            <span class="phase-badge ${data.phase}">${data.phase === 'solid' ? 'ANCHOR' : 'common'}</span>
+	                        </h2>
+	                        <div class="result-meta">
+	                            <span>Mode: ${data.mode}</span>
+	                            <span>Mass: ${(data.mass || 0).toFixed(2)}</span>
+	                            <span>${localCount} local, ${globalCount} global</span>
+	                        </div>
+	                    </div>
+	                    <div class="graph-preview">
+	                        <div class="graph-preview-header">
+	                            <span>3D molecule (local graph)</span>
+	                            <a href="${fullHref}" target="_blank">Open full</a>
+	                        </div>
+	                        <iframe class="graph-frame" src="${miniSrc}"></iframe>
+	                    </div>
+	            `;
             
             // Group by orbit (physics from INVARIANTS.md)
             const core = data.neighbors.filter(n => Math.abs(n.weight) >= 0.7);
@@ -572,17 +712,19 @@ HTML_PAGE = '''<!DOCTYPE html>
                 });
                 const data = await res.json();
                 
-                if (data.error) {
-                    content.innerHTML = '<div class="empty"><h3>Error</h3><p>' + data.error + '</p></div>';
-                } else {
-                    content.innerHTML = `
-                        <div class="empty">
-                            <h3>✓ Document Added</h3>
-                            <p>${data.anchors} concepts extracted, ${data.edges} connections created</p>
-                            <p style="margin-top: 16px; color: #3fb950;">Reload page to see updated results</p>
-                        </div>
-                    `;
-                }
+	                if (data.error) {
+	                    content.innerHTML = '<div class="empty"><h3>Error</h3><p>' + data.error + '</p></div>';
+	                } else {
+	                    try { await loadDocs(); } catch (e) {}
+	                    setSelectedDoc(file.name);
+	                    content.innerHTML = `
+	                        <div class="empty">
+	                            <h3>✓ Document Added</h3>
+	                            <p>${data.anchors} concepts extracted, ${data.edges} connections created</p>
+	                            <p style="margin-top: 16px; color: #3fb950;">Selected: ${file.name}</p>
+	                        </div>
+	                    `;
+	                }
             } catch (err) {
                 content.innerHTML = '<div class="empty"><h3>Upload Error</h3><p>' + err.message + '</p></div>';
             }
@@ -590,17 +732,35 @@ HTML_PAGE = '''<!DOCTYPE html>
             input.value = '';
         }
         
-        function handleDrop(e) {
-            const files = e.dataTransfer.files;
-            if (files.length > 0) {
-                const fakeInput = { files: files };
-                uploadFile(fakeInput);
-            }
-        }
-    </script>
-</body>
-</html>
-'''
+	        function handleDrop(e) {
+	            const files = e.dataTransfer.files;
+	            if (files.length > 0) {
+	                const fakeInput = { files: files };
+	                uploadFile(fakeInput);
+	            }
+	        }
+
+	        async function init() {
+	            const params = new URLSearchParams(window.location.search);
+	            const docParam = (params.get('doc') || '').trim();
+	            let stored = '';
+	            try { stored = (localStorage.getItem('inv_doc') || '').trim(); } catch (e) {}
+	            
+	            setSelectedDoc(docParam || stored || '');
+	            await loadDocs();
+	            
+	            const qParam = (params.get('q') || '').trim();
+	            if (qParam) {
+	                queryInput.value = qParam;
+	                search();
+	            }
+	        }
+	        
+	        init();
+	    </script>
+	</body>
+	</html>
+	'''
 
 
 class UIHandler(BaseHTTPRequestHandler):
@@ -612,6 +772,9 @@ class UIHandler(BaseHTTPRequestHandler):
     
     _graph_cache_key: Optional[tuple] = None
     _graph_cache_value: Optional[dict] = None
+    
+    _degree_total_cache: Dict[str, int] = {}
+    _degree_total_crystal_id: Optional[str] = None
     
     def log_message(self, format, *args):
         pass  # Suppress logging
@@ -640,17 +803,23 @@ class UIHandler(BaseHTTPRequestHandler):
         elif parsed.path == '/graph':
             self.serve_graph_page()
         elif parsed.path == '/graph3d':
-            self.serve_gravity3d_page()
+            self.serve_graph3d_page(parsed.query)
+        elif parsed.path == '/doc':
+            self.serve_doc_page(parsed.query)
         elif parsed.path == '/cloud':
             self.serve_cloud2d_page()
         elif parsed.path == '/cloud3d':
             self.serve_cloud_page()
+        elif parsed.path == '/gravity3d':
+            self.serve_gravity3d_page()
         elif parsed.path == '/api/search':
             self.api_search(parsed.query)
         elif parsed.path == '/api/suggest':
             self.api_suggest(parsed.query)
         elif parsed.path == '/api/graph':
-            self.api_graph()
+            self.api_graph(parsed.query)
+        elif parsed.path == '/api/docs':
+            self.api_docs()
         elif parsed.path == '/api/status':
             self.api_status()
         else:
@@ -672,6 +841,123 @@ class UIHandler(BaseHTTPRequestHandler):
         page = HTML_PAGE.replace('$$CRYSTAL_ID$$', html.escape(crystal_id))
         page = page.replace('$$OVERLAY_STATUS$$', overlay_status)
         
+        self.send_html(page)
+
+    def serve_doc_page(self, query_string: str = ""):
+        """Document chooser + per-document view (local overlay)."""
+        overlay = UIHandler.overlay
+        physics = UIHandler.physics
+        params = urllib.parse.parse_qs(query_string or "")
+        doc = (params.get('doc', [''])[0] or '').strip()
+        
+        if not overlay:
+            self.send_html(
+                "<!doctype html><html><body style='font-family:-apple-system;padding:24px;'>"
+                "<h1>Docs</h1><p>No local documents yet.</p><p><a href='/'>Back</a></p>"
+                "</body></html>"
+            )
+            return
+        
+        # Build doc stats
+        docs: dict[str, dict] = {}
+        for src, edge_list in overlay.edges.items():
+            for edge in edge_list:
+                if not edge.doc:
+                    continue
+                d = docs.get(edge.doc)
+                if d is None:
+                    d = {'doc': edge.doc, 'edges': 0, 'nodes': set()}
+                    docs[edge.doc] = d
+                d['edges'] += 1
+                d['nodes'].add(src)
+                d['nodes'].add(edge.tgt)
+        
+        if not doc:
+            items = []
+            for name, d in sorted(docs.items(), key=lambda kv: (-kv[1]['edges'], kv[0].lower())):
+                items.append(
+                    f"<a class='item' href='/doc?doc={urllib.parse.quote(name)}'>"
+                    f"<span class='name'>{html.escape(name)}</span>"
+                    f"<span class='meta'>{d['edges']} edges • {len(d['nodes'])} nodes</span>"
+                    f"</a>"
+                )
+            crystal = html.escape(physics.crystal_id if physics else "unknown")
+            page = (
+                "<!doctype html><html><head><meta charset='utf-8'/>"
+                "<meta name='viewport' content='width=device-width,initial-scale=1'/>"
+                "<title>Docs — Invariant</title>"
+                "<style>"
+                "body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0d1117;color:#e6edf3;margin:0;padding:24px;}"
+                "h1{margin:0 0 8px;color:#58a6ff;font-size:22px;}"
+                ".sub{color:#8b949e;margin:0 0 18px;font-size:13px;}"
+                ".list{display:flex;flex-direction:column;gap:10px;max-width:720px;}"
+                ".item{display:flex;justify-content:space-between;gap:12px;align-items:center;"
+                "padding:12px 14px;border:1px solid #21262d;border-radius:10px;background:#161b22;text-decoration:none;color:#e6edf3;}"
+                ".item:hover{border-color:#58a6ff;}"
+                ".name{font-weight:600;}"
+                ".meta{color:#8b949e;font-size:12px;white-space:nowrap;}"
+                "a.back{color:#58a6ff;text-decoration:none;font-size:13px;}"
+                "a.back:hover{text-decoration:underline;}"
+                "</style></head><body>"
+                f"<h1>Docs</h1><p class='sub'>Crystal: <strong>{crystal}</strong> • choose a document overlay</p>"
+                "<p><a class='back' href='/'>← Back to search</a></p>"
+                "<div class='list'>"
+                + "".join(items)
+                + "</div></body></html>"
+            )
+            self.send_html(page)
+            return
+        
+        if doc not in docs:
+            self.send_error(404, "Unknown document")
+            return
+        
+        d = docs[doc]
+        doc_q = urllib.parse.quote(doc)
+        graph_href = f"/graph3d?doc={doc_q}"
+        graph_embed = f"/graph3d?embed=1&doc={doc_q}"
+        
+        # Collect nodes in this doc (sorted by label)
+        nodes = sorted((overlay.labels.get(h8) or h8[:8], h8) for h8 in d['nodes'])
+        node_links = []
+        for label, _h8 in nodes[:400]:
+            q = urllib.parse.quote(label)
+            node_links.append(
+                f"<a class='pill' href='/?q={q}&doc={doc_q}'>{html.escape(label)}</a>"
+            )
+        
+        crystal = html.escape(physics.crystal_id if physics else "unknown")
+        page = (
+            "<!doctype html><html><head><meta charset='utf-8'/>"
+            "<meta name='viewport' content='width=device-width,initial-scale=1'/>"
+            "<title>Doc — Invariant</title>"
+            "<style>"
+            "body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#0d1117;color:#e6edf3;margin:0;padding:24px;}"
+            "h1{margin:0 0 8px;color:#58a6ff;font-size:22px;}"
+            ".sub{color:#8b949e;margin:0 0 18px;font-size:13px;}"
+            ".row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:10px 0 16px;}"
+            "a.back,a.link{color:#58a6ff;text-decoration:none;font-size:13px;}"
+            "a.back:hover,a.link:hover{text-decoration:underline;}"
+            ".frame{width:100%;height:70vh;border:1px solid #21262d;border-radius:12px;overflow:hidden;background:#0d1117;}"
+            "iframe{width:100%;height:100%;border:0;}"
+            ".pills{margin-top:14px;display:flex;flex-wrap:wrap;gap:8px;}"
+            ".pill{padding:6px 10px;border:1px solid #21262d;border-radius:999px;background:#161b22;"
+            "text-decoration:none;color:#e6edf3;font-size:12px;}"
+            ".pill:hover{border-color:#58a6ff;}"
+            "</style></head><body>"
+            f"<h1>{html.escape(doc)}</h1>"
+            f"<p class='sub'>Crystal: <strong>{crystal}</strong> • {d['edges']} edges • {len(d['nodes'])} nodes</p>"
+            "<div class='row'>"
+            f"<a class='back' href='/'>← Back</a>"
+            f"<a class='link' href='{graph_href}' target='_blank'>Open 3D</a>"
+            f"<a class='link' href='/doc'>All docs</a>"
+            "</div>"
+            f"<div class='frame'><iframe src='{graph_embed}'></iframe></div>"
+            "<div class='pills'>"
+            + "".join(node_links)
+            + "</div>"
+            "</body></html>"
+        )
         self.send_html(page)
     
     def serve_graph_page(self):
@@ -905,8 +1191,8 @@ class UIHandler(BaseHTTPRequestHandler):
 </html>'''
         self.send_html(graph_html)
     
-    def api_graph(self):
-        """Return graph data for visualization."""
+    def api_graph(self, query_string: str = ""):
+        """Return (optionally filtered) local overlay graph with physics fields."""
         import math
         
         overlay = UIHandler.overlay
@@ -917,64 +1203,112 @@ class UIHandler(BaseHTTPRequestHandler):
             self.send_json({'nodes': [], 'edges': [], 'mean_mass': mean_mass})
             return
         
-        overlay_mtime_ns = None
-        if UIHandler.overlay_path and UIHandler.overlay_path.exists():
-            try:
-                overlay_mtime_ns = UIHandler.overlay_path.stat().st_mtime_ns
-            except OSError:
-                overlay_mtime_ns = None
+        params = urllib.parse.parse_qs(query_string or "")
+        doc_filter = (params.get('doc', [''])[0] or '').strip()
+        focus = (params.get('focus', [''])[0] or '').strip()
+        try:
+            radius = int(params.get('radius', ['0'])[0])
+        except Exception:
+            radius = 0
+        try:
+            max_nodes = int(params.get('max_nodes', ['0'])[0])
+        except Exception:
+            max_nodes = 0
         
-        cache_key = (
-            physics.crystal_id if physics else None,
-            overlay_mtime_ns,
-            overlay.n_edges,
-            len(overlay.labels),
-        )
-        if cache_key == UIHandler._graph_cache_key and UIHandler._graph_cache_value is not None:
-            self.send_json(UIHandler._graph_cache_value)
+        # Resolve focus (hash8 or label) -> hash8
+        focus_id: Optional[str] = None
+        if focus:
+            if re.fullmatch(r'[0-9a-fA-F]{16}', focus):
+                focus_id = focus.lower()
+            else:
+                needle = focus.strip().lower()
+                for h8, label in overlay.labels.items():
+                    if label and label.strip().lower() == needle:
+                        focus_id = h8
+                        break
+        
+        # Build filtered edge list (doc filter applies only to local edges).
+        edge_rows: list[tuple[str, str, float]] = []
+        node_set: set[str] = set()
+        for src, edge_list in overlay.edges.items():
+            for edge in edge_list:
+                if doc_filter and edge.doc != doc_filter:
+                    continue
+                node_set.add(src)
+                node_set.add(edge.tgt)
+                edge_rows.append((src, edge.tgt, abs(edge.weight)))
+        
+        if not node_set:
+            self.send_json({'nodes': [], 'edges': [], 'mean_mass': mean_mass, 'doc': doc_filter or None})
             return
         
-        node_set: set[str] = set()
-        nodes_base: list[dict] = []
-        for h8, label in overlay.labels.items():
-            if label:
-                node_set.add(h8)
-                nodes_base.append({'id': h8, 'label': label})
+        # Focused subgraph (BFS radius) to keep embedded views small.
+        if focus_id and radius > 0 and focus_id in node_set:
+            adj: dict[str, set[str]] = {h8: set() for h8 in node_set}
+            for a, b, _w in edge_rows:
+                if a in adj:
+                    adj[a].add(b)
+                if b in adj:
+                    adj[b].add(a)
+            keep = {focus_id}
+            frontier = {focus_id}
+            for _ in range(radius):
+                nxt = set()
+                for u in frontier:
+                    nxt.update(adj.get(u, ()))
+                nxt -= keep
+                keep |= nxt
+                frontier = nxt
+                if not frontier:
+                    break
+            node_set = keep
+            edge_rows = [(a, b, w) for (a, b, w) in edge_rows if a in node_set and b in node_set]
         
-        edges: list[dict] = []
+        # Optional hard cap (only meaningful with focus).
+        if max_nodes and focus_id and len(node_set) > max_nodes:
+            # Keep closest nodes by BFS order (already in keep), just trim deterministically.
+            trimmed = list(node_set)
+            trimmed.sort()
+            node_set = set(trimmed[:max_nodes])
+            if focus_id not in node_set:
+                node_set.add(focus_id)
+            edge_rows = [(a, b, w) for (a, b, w) in edge_rows if a in node_set and b in node_set]
+        
         degree_local: dict[str, int] = {h8: 0 for h8 in node_set}
-        for src, edge_list in overlay.edges.items():
-            if src not in node_set:
-                continue
-            for edge in edge_list:
-                tgt = edge.tgt
-                if tgt in node_set:
-                    w = abs(edge.weight)
-                    edges.append({'source': src, 'target': tgt, 'weight': w})
-                    # Treat as undirected for degree/temperature visualization.
-                    degree_local[src] = degree_local.get(src, 0) + 1
-                    degree_local[tgt] = degree_local.get(tgt, 0) + 1
+        edges: list[dict] = []
+        for a, b, w in edge_rows:
+            edges.append({'source': a, 'target': b, 'weight': w})
+            degree_local[a] = degree_local.get(a, 0) + 1
+            degree_local[b] = degree_local.get(b, 0) + 1
         
-        # Degree_total (HALO_SPEC): required for deterministic Mass.
+        # Degree_total cache (HALO_SPEC): required for deterministic Mass.
+        if physics:
+            if UIHandler._degree_total_crystal_id != physics.crystal_id:
+                UIHandler._degree_total_crystal_id = physics.crystal_id
+                UIHandler._degree_total_cache = {}
+        
         degree_total: dict[str, int] = {}
         if physics and node_set:
-            try:
-                results = physics._client.get_halo_pages(node_set, limit=0)
-                for h8, result in results.items():
-                    meta = result.get('meta') or {}
-                    try:
-                        degree_total[h8] = int(meta.get('degree_total') or 0)
-                    except Exception:
-                        degree_total[h8] = 0
-            except Exception:
-                degree_total = {}
+            missing = [h8 for h8 in node_set if h8 not in UIHandler._degree_total_cache]
+            if missing:
+                try:
+                    results = physics._client.get_halo_pages(missing, limit=0)
+                    for h8, result in results.items():
+                        meta = result.get('meta') or {}
+                        try:
+                            UIHandler._degree_total_cache[h8] = int(meta.get('degree_total') or 0)
+                        except Exception:
+                            UIHandler._degree_total_cache[h8] = 0
+                except Exception:
+                    pass
+            for h8 in node_set:
+                if h8 in UIHandler._degree_total_cache:
+                    degree_total[h8] = UIHandler._degree_total_cache[h8]
         
         nodes: list[dict] = []
-        for base in nodes_base:
-            h8 = base['id']
-            deg_total = degree_total.get(h8)
-            if deg_total is None:
-                deg_total = degree_local.get(h8, 0)
+        for h8 in sorted(node_set):
+            label = overlay.labels.get(h8) or h8[:8]
+            deg_total = degree_total.get(h8, degree_local.get(h8, 0))
             try:
                 mass = 1.0 / math.log(2 + max(0, int(deg_total)))
             except Exception:
@@ -982,17 +1316,21 @@ class UIHandler(BaseHTTPRequestHandler):
             phase = 'solid' if mass > mean_mass else 'gas'
             nodes.append({
                 'id': h8,
-                'label': base['label'],
+                'label': label,
                 'mass': mass,
                 'phase': phase,
                 'degree': degree_local.get(h8, 0),
                 'degree_total': int(deg_total),
             })
         
-        payload = {'nodes': nodes, 'edges': edges, 'mean_mass': mean_mass}
-        UIHandler._graph_cache_key = cache_key
-        UIHandler._graph_cache_value = payload
-        self.send_json(payload)
+        self.send_json({
+            'nodes': nodes,
+            'edges': edges,
+            'mean_mass': mean_mass,
+            'doc': doc_filter or None,
+            'focus': focus_id,
+            'radius': radius,
+        })
 
     def serve_cloud2d_page(self):
         """Classic 2D tag cloud (text-only, physics-based)."""
@@ -1833,134 +2171,286 @@ class UIHandler(BaseHTTPRequestHandler):
 </html>'''
         self.send_html(gravity_html)
 
-    def serve_graph3d_page(self):
-        """Serve 3D Force Graph - Semantic Gravity (Pure Physics)."""
-        graph3d_html = '''<!DOCTYPE html>
-<html>
+    def serve_graph3d_page(self, query_string: str = ""):
+        """3D molecule view (WebGL) with doc/focus filtering."""
+        graph3d_html = '''<!doctype html>
+<html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>Neural Topology — Invariant</title>
-    <!-- ForceGraph bundles THREE and d3 -->
-    <script src="//unpkg.com/3d-force-graph"></script>
-    <style>
-        body { margin: 0; background: #000; overflow: hidden; font-family: monospace; }
-        #overlay {
-            position: fixed; top: 20px; left: 20px; z-index: 100;
-            color: #666; font-size: 11px; pointer-events: none;
-            text-shadow: 0 0 3px #000;
-        }
-        h1 { color: #fff; font-size: 13px; letter-spacing: 2px; margin: 0 0 10px; }
-        .legend { margin-top: 12px; }
-        .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>3D Molecule — Invariant</title>
+  <script src="https://unpkg.com/3d-force-graph"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0d1117; color: #e6edf3; overflow: hidden; }
+    #graph { position: absolute; inset: 0; }
+    #labels { position: absolute; inset: 0; pointer-events: none; }
+    .lbl {
+      position: absolute;
+      padding: 2px 6px;
+      border-radius: 6px;
+      background: rgba(13, 17, 23, 0.65);
+      border: 1px solid rgba(48, 54, 61, 0.7);
+      font: 12px/1.3 -apple-system, BlinkMacSystemFont, sans-serif;
+      color: #e6edf3;
+      white-space: nowrap;
+      transform: translate(-50%, -135%);
+    }
+    .lbl.solid { border-color: rgba(88, 166, 255, 0.55); }
+    #hud {
+      position: fixed;
+      top: 14px;
+      left: 14px;
+      width: 360px;
+      background: rgba(22, 27, 34, 0.95);
+      border: 1px solid #30363d;
+      border-radius: 10px;
+      padding: 12px 12px;
+      z-index: 10;
+      backdrop-filter: blur(6px);
+    }
+    #hud h1 { font-size: 12px; color: #58a6ff; letter-spacing: 1px; text-transform: uppercase; margin-bottom: 8px; }
+    #hud .row { font: 12px/1.4 -apple-system, BlinkMacSystemFont, sans-serif; color: #8b949e; margin: 3px 0; }
+    #hud .row span { color: #e6edf3; }
+    #hud .btns { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+    #hud button {
+      background: #21262d; color: #e6edf3; border: 1px solid #30363d;
+      padding: 6px 8px; border-radius: 8px; cursor: pointer;
+      font-size: 12px;
+    }
+    #hud button.active { border-color: #58a6ff; }
+    #hud a { color: #58a6ff; text-decoration: none; }
+    body.embed #hud { display: none; }
+  </style>
 </head>
 <body>
-    <div id="overlay">
-        <h1>NEURAL TOPOLOGY</h1>
-        <div>ATOM: Star (hover=info)</div>
-        <div>SIZE: Mass (1/log(2+d))</div>
-        <div>SYNAPSE: Conductivity</div>
-        <div class="legend">
-            <div><span class="dot" style="background:#79c0ff;box-shadow:0 0 8px #79c0ff"></span>SOLID (Anchor)</div>
-            <div><span class="dot" style="background:#444"></span>GAS (Noise)</div>
-        </div>
-        <div style="margin-top:15px;color:#444">
-            Scroll=Zoom | Drag=Rotate | Click=Search
-        </div>
+  <div id="graph"></div>
+  <div id="labels"></div>
+  <div id="hud">
+    <h1>3D Molecule</h1>
+    <div class="row">Doc: <span id="docName">—</span></div>
+    <div class="row">Nodes: <span id="nNodes">0</span> • Edges: <span id="nEdges">0</span></div>
+    <div class="row">Focus: <span id="focusName">—</span></div>
+    <div class="row">Hover: <span id="hoverName">—</span></div>
+    <div class="row">Size = <span>Mass</span> • Color = <span>Temperature</span> • Distance = <span>Weight</span></div>
+    <div class="row">Drag=Rotate • Right/Shift=Pan • Wheel=Zoom</div>
+    <div class="btns">
+      <button id="btnLabels" class="active">Labels</button>
+      <button id="btnAnchors">Anchors</button>
+      <button id="btnFit">Fit</button>
+      <a id="backLink" href="/">Back</a>
     </div>
-    
-    <div id="graph"></div>
-    
-    <script>
-        fetch('/api/graph')
-            .then(r => r.json())
-            .then(data => {
-                // Store original node data in lookup map (3d-force-graph mutates nodes)
-                const nodeMap = {};
-                data.nodes.forEach(n => { nodeMap[n.id] = n; });
-                
-                ForceGraph3D()
-                    (document.getElementById('graph'))
-                    .backgroundColor('#000000')
-                    .showNavInfo(false)
-                    .nodeId('id')  // Ensure we use 'id' as node identifier
-                    .graphData({
-                        nodes: data.nodes,
-                        links: data.edges.map(e => ({source: e.source, target: e.target, value: e.weight}))
-                    })
-                    
-                    // ═══════════════════════════════════════
-                    // PHYSICS (INVARIANT LAWS)
-                    // ═══════════════════════════════════════
-                    
-                    // GRAVITY: Weight → Distance
-                    // Strong connection (0.9) → close together
-                    // Weak connection (0.1) → far apart
-                    .d3Force('link', d3.forceLink().id(d => d.id)
-                        .distance(link => 300 * (1 - link.value))
-                        .strength(link => link.value * 0.5)
-                    )
-                    
-                    // REPULSION: Mass → Space
-                    // Heavy words push neighbors away
-                    .d3Force('charge', d3.forceManyBody()
-                        .strength(node => -100 - (node.mass * 1000))
-                    )
-                    
-                    // ═══════════════════════════════════════
-                    // MATTER (Stars as Atoms)
-                    // ═══════════════════════════════════════
-                    
-                    // SIZE = Mass (Information density)
-                    .nodeVal(node => {
-                        const n = nodeMap[node.id];
-                        return n ? (2 + n.mass * 25) : 5;
-                    })
-                    
-                    // COLOR = Phase (Temperature)
-                    // Solid (Ice/Anchor) = Bright Blue
-                    // Gas (Noise) = Dim Grey
-                    .nodeColor(node => {
-                        const n = nodeMap[node.id];
-                        if (!n) return '#888888';
-                        return n.phase === 'solid' ? '#79c0ff' : '#555555';
-                    })
-                    .nodeOpacity(0.9)
-                    
-                    // LABEL = Plain text tooltip
-                    .nodeLabel(node => {
-                        const n = nodeMap[node.id];
-                        if (!n) return node.id;
-                        return n.label + ' | mass:' + n.mass.toFixed(3) + ' | deg:' + n.degree + ' | ' + n.phase;
-                    })
-                    
-                    // ═══════════════════════════════════════
-                    // SYNAPSES (Conductivity)
-                    // ═══════════════════════════════════════
-                    
-                    // Faint lines showing the connectome structure
-                    .linkWidth(link => 0.5 + link.value * 1.5)
-                    .linkOpacity(0.08)  // Very faint - just "dust" in space
-                    .linkColor(() => '#333333')
-                    
-                    // IMPULSES (Particles showing potential)
-                    .linkDirectionalParticles(1)
-                    .linkDirectionalParticleSpeed(link => link.value * 0.003)
-                    .linkDirectionalParticleWidth(1.5)
-                    .linkDirectionalParticleColor(() => '#555555')
-                    
-                    // INTERACTION
-                    .onNodeClick(node => {
-                        window.location.href = '/?q=' + encodeURIComponent(node.label);
-                    });
-            });
-    </script>
+  </div>
+  <script>
+  (async function () {
+    const params = new URLSearchParams(window.location.search);
+    const embed = params.get('embed') === '1';
+    if (embed) document.body.classList.add('embed');
+
+    const doc = (params.get('doc') || '').trim();
+    const focusParam = (params.get('focus') || '').trim();
+    const radius = (params.get('radius') || (embed ? '1' : '0')).trim();
+    const maxNodes = (params.get('max_nodes') || (embed ? '180' : '0')).trim();
+
+    const api = new URL('/api/graph', window.location.origin);
+    if (doc) api.searchParams.set('doc', doc);
+    if (focusParam) api.searchParams.set('focus', focusParam);
+    if (radius && radius !== '0') api.searchParams.set('radius', radius);
+    if (maxNodes && maxNodes !== '0') api.searchParams.set('max_nodes', maxNodes);
+
+    const graphEl = document.getElementById('graph');
+    const labelsEl = document.getElementById('labels');
+
+    const res = await fetch(api.toString());
+    const data = await res.json();
+    const nodes = (data.nodes || []).map(n => ({ ...n }));
+    const edges = (data.edges || []).map(e => ({ ...e }));
+
+    document.getElementById('docName').textContent = data.doc || (doc ? doc : 'all');
+    document.getElementById('nNodes').textContent = String(nodes.length);
+    document.getElementById('nEdges').textContent = String(edges.length);
+
+    if (!nodes.length) {
+      document.getElementById('focusName').textContent = '—';
+      graphEl.innerHTML = '<div style="position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);color:#8b949e;font:14px -apple-system;">No local graph</div>';
+      return;
+    }
+
+    const links = edges.map(e => ({ source: e.source, target: e.target, value: +e.weight || 0 }));
+
+    // Temperature: monotonic with log-degree_total.
+    const degLogs = nodes.map(n => Math.log(2 + Math.max(0, +n.degree_total || 0)));
+    const minLog = Math.min(...degLogs);
+    const maxLog = Math.max(...degLogs);
+    const cold = [121, 192, 255]; // #79c0ff
+    const hot = [255, 123, 114];  // #ff7b72
+    const clamp01 = (x) => Math.max(0, Math.min(1, x));
+    const temp01 = (n) => {
+      const v = Math.log(2 + Math.max(0, +n.degree_total || 0));
+      if (maxLog <= minLog) return 0;
+      return clamp01((v - minLog) / (maxLog - minLog));
+    };
+    const tempColor = (t) => {
+      t = clamp01(t);
+      const r = Math.round(cold[0] + (hot[0] - cold[0]) * t);
+      const g = Math.round(cold[1] + (hot[1] - cold[1]) * t);
+      const b = Math.round(cold[2] + (hot[2] - cold[2]) * t);
+      return `rgb(${r},${g},${b})`;
+    };
+
+    const byId = new Map(nodes.map(n => [n.id, n]));
+    const adj = new Map(nodes.map(n => [n.id, new Set()]));
+    links.forEach(l => {
+      adj.get(l.source)?.add(l.target);
+      adj.get(l.target)?.add(l.source);
+    });
+
+    const focusId = data.focus || (focusParam && byId.has(focusParam) ? focusParam : null);
+    const focusNode = focusId ? byId.get(focusId) : null;
+    document.getElementById('focusName').textContent = focusNode ? focusNode.label : (focusParam || '—');
+
+    let showLabels = true;
+    let anchorsOnly = false;
+    let hoveredId = null;
+
+    const Graph = ForceGraph3D()(graphEl)
+      .backgroundColor('#0d1117')
+      .showNavInfo(false)
+      .nodeId('id')
+      .graphData({ nodes, links })
+      .nodeVal(n => 2 + (Math.max(0, +n.mass || 0) * 10))
+      .nodeColor(n => tempColor(temp01(n)))
+      .nodeOpacity(0.95)
+      .linkWidth(l => 0.3 + (clamp01(+l.value || 0) * 1.6))
+      .linkOpacity(embed ? 0.25 : 0.16)
+      .linkColor(() => '#30363d')
+      .onNodeHover(n => {
+        hoveredId = n ? n.id : null;
+        document.getElementById('hoverName').textContent = n ? n.label : '—';
+        scheduleLabels();
+      })
+      .onNodeClick(n => {
+        if (embed) return;
+        const url = new URL('/', window.location.origin);
+        url.searchParams.set('q', n.label);
+        if (doc) url.searchParams.set('doc', doc);
+        window.location.href = url.toString();
+      })
+      .nodeLabel(n => `${n.label}\\nMass: ${(n.mass||0).toFixed(4)}\\nDegree_total: ${n.degree_total}`);
+
+    // Physics mapping: weight affects distance/strength; mass affects charge (space).
+    Graph.d3Force('link')
+      .distance(l => 80 + (1 - clamp01(+l.value || 0)) * 220)
+      .strength(l => Math.max(0.05, clamp01(+l.value || 0)));
+    Graph.d3Force('charge')
+      .strength(n => -40 - (Math.max(0, +n.mass || 0) * 160));
+
+    const controls = Graph.controls();
+    if (controls && controls.addEventListener) {
+      controls.addEventListener('change', () => scheduleLabels());
+    }
+    window.addEventListener('resize', () => scheduleLabels());
+
+    // HTML labels (caption near sphere)
+    const labelEls = new Map();
+    nodes.forEach(n => {
+      const el = document.createElement('div');
+      el.className = 'lbl' + (n.phase === 'solid' ? ' solid' : '');
+      el.textContent = n.label;
+      labelsEl.appendChild(el);
+      labelEls.set(n.id, el);
+    });
+
+    function labelVisible(nid) {
+      if (!showLabels) return false;
+      const n = byId.get(nid);
+      if (!n) return false;
+      if (anchorsOnly && !(n.mass > (data.mean_mass || 0.26))) return false;
+      if (embed) return true;
+      if (hoveredId) return nid === hoveredId || adj.get(hoveredId)?.has(nid);
+      if (focusId) return nid === focusId || adj.get(focusId)?.has(nid);
+      return n.mass > (data.mean_mass || 0.26);
+    }
+
+    let lastLbl = 0;
+    let lblRaf = null;
+    function updateLabels() {
+      lblRaf = null;
+      const now = performance.now();
+      if (now - lastLbl < 25) return;
+      lastLbl = now;
+      const rect = graphEl.getBoundingClientRect();
+      nodes.forEach(n => {
+        const el = labelEls.get(n.id);
+        if (!el) return;
+        if (!labelVisible(n.id) || n.x == null) {
+          el.style.display = 'none';
+          return;
+        }
+        const c = Graph.graph2ScreenCoords(n.x, n.y, n.z);
+        if (c.x < -50 || c.y < -50 || c.x > rect.width + 50 || c.y > rect.height + 50) {
+          el.style.display = 'none';
+          return;
+        }
+        el.style.display = 'block';
+        el.style.left = c.x + 'px';
+        el.style.top = c.y + 'px';
+      });
+    }
+    function scheduleLabels() {
+      if (lblRaf) return;
+      lblRaf = requestAnimationFrame(updateLabels);
+    }
+    Graph.onEngineTick(scheduleLabels);
+    Graph.onEngineStop(scheduleLabels);
+
+    // Fit/focus
+    setTimeout(() => {
+      try {
+        if (focusId) {
+          Graph.zoomToFit(700, 80, n => n.id === focusId || adj.get(focusId)?.has(n.id));
+        } else {
+          Graph.zoomToFit(700, 80);
+        }
+      } catch (e) {}
+    }, 600);
+
+    // HUD controls
+    const btnLabels = document.getElementById('btnLabels');
+    const btnAnchors = document.getElementById('btnAnchors');
+    const btnFit = document.getElementById('btnFit');
+    const backLink = document.getElementById('backLink');
+    if (embed) {
+      // no-op
+    } else {
+      if (doc) {
+        const url = new URL('/', window.location.origin);
+        url.searchParams.set('doc', doc);
+        backLink.href = url.toString();
+      }
+      btnLabels.onclick = () => {
+        showLabels = !showLabels;
+        btnLabels.classList.toggle('active', showLabels);
+        scheduleLabels();
+      };
+      btnAnchors.onclick = () => {
+        anchorsOnly = !anchorsOnly;
+        btnAnchors.classList.toggle('active', anchorsOnly);
+        scheduleLabels();
+      };
+      btnFit.onclick = () => {
+        try { Graph.zoomToFit(700, 80); } catch (e) {}
+      };
+    }
+  })();
+  </script>
 </body>
 </html>'''
         self.send_html(graph3d_html)
     def api_search(self, query_string: str):
         params = urllib.parse.parse_qs(query_string)
         q = params.get('q', [''])[0].strip()
+        doc_filter = (params.get('doc', [''])[0] or '').strip()
         
         if not q:
             self.send_json({'error': 'No query'}, 400)
@@ -2002,21 +2492,15 @@ class UIHandler(BaseHTTPRequestHandler):
             for n in raw_neighbors:
                 h8 = n.get('hash8', '')
                 weight = n.get('weight', 0)
-                doc = n.get('doc')
+                is_local = 'doc' in n  # overlay edges include doc field
+                doc = n.get('doc') if is_local else None
+                
+                if is_local and doc_filter and doc != doc_filter:
+                    continue
                 
                 # Get human-readable label: LOCAL overlay first, then global server
-                label = None
-                source = 'global'
-                
-                if overlay:
-                    label = overlay.get_label(h8)
-                    for src_edges in overlay.edges.values():
-                        for edge in src_edges:
-                            if edge.tgt == h8:
-                                source = 'local'
-                                if edge.doc:
-                                    doc = edge.doc
-                                break
+                source = 'local' if is_local else 'global'
+                label = overlay.get_label(h8) if (is_local and overlay) else None
                 
                 # Fallback: use global server label
                 if not label:
@@ -2035,16 +2519,17 @@ class UIHandler(BaseHTTPRequestHandler):
                 })
             
             # Sort: local first, then by weight
-            neighbors.sort(key=lambda x: (0 if x['source'] == 'local' else 1, -x['weight']))
+            neighbors.sort(key=lambda x: (0 if x['source'] == 'local' else 1, -abs(x['weight'])))
             
             # Response includes physics properties
             self.send_json({
                 'query': q,
+                'doc': doc_filter or None,
                 'mode': search_mode,  # Honest: tells user what mode was used
                 'phase': concept.phase,  # solid/gas
                 'mass': concept.mass,  # information content
                 'mean_mass': physics.mean_mass,  # phase boundary
-                'atoms': len(concept.atoms),  # number of resolved words
+                'atoms': concept.atoms,  # resolved hash8 atoms
                 'neighbors': neighbors
             })
             
@@ -2241,6 +2726,33 @@ class UIHandler(BaseHTTPRequestHandler):
             'edges': overlay.n_edges if overlay else 0,
             'labels': len(overlay.labels) if overlay else 0
         })
+
+    def api_docs(self):
+        """List ingested documents with simple stats (local overlay only)."""
+        overlay = UIHandler.overlay
+        if not overlay:
+            self.send_json({'docs': []})
+            return
+        
+        docs: dict[str, dict] = {}
+        for src, edge_list in overlay.edges.items():
+            for edge in edge_list:
+                if not edge.doc:
+                    continue
+                d = docs.get(edge.doc)
+                if d is None:
+                    d = {'doc': edge.doc, 'edges': 0, 'nodes_set': set()}
+                    docs[edge.doc] = d
+                d['edges'] += 1
+                d['nodes_set'].add(src)
+                d['nodes_set'].add(edge.tgt)
+        
+        out = []
+        for doc, d in docs.items():
+            out.append({'doc': doc, 'edges': d['edges'], 'nodes': len(d['nodes_set'])})
+        
+        out.sort(key=lambda x: (-x['edges'], x['doc'].lower()))
+        self.send_json({'docs': out})
 
 
 class ReuseHTTPServer(HTTPServer):
