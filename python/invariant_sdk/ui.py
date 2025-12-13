@@ -828,12 +828,28 @@ HTML_PAGE = '''<!DOCTYPE html>
                     const badge = isLocal 
                         ? '<span class="badge badge-local" title="From local documents (σ-fact)">📄 σ</span>'
                         : '<span class="badge badge-global" title="From global crystal (α-context)">🌐 α</span>';
-                    const docInfo = n.doc ? ' • ' + escHtml(n.doc) : '';
+                    
+                    // Build location info with line number
+                    let locInfo = '';
+                    if (n.doc) {
+                        locInfo = n.doc;
+                        if (n.line) {
+                            locInfo += ':' + n.line;
+                        }
+                    }
+                    
+                    // Build tooltip with snippet
+                    let tooltip = isLocal ? 'σ-fact from document' : 'α-context from global crystal';
+                    if (n.snippet) {
+                        tooltip = n.snippet;
+                    }
                     
                     group += `
-                        <li class="result-item ${isLocal ? 'local' : ''}" onclick="searchWord(${labelArg})">
+                        <li class="result-item ${isLocal ? 'local' : ''}" 
+                            onclick="searchWord(${labelArg})"
+                            title="${escHtml(tooltip)}">
                             <span class="result-word">${labelText}</span>
-                            <span class="result-weight">${weight}${docInfo}</span>
+                            <span class="result-weight">${weight}${locInfo ? ' • ' + escHtml(locInfo) : ''}</span>
                             ${badge}
                         </li>
                     `;
@@ -2704,6 +2720,8 @@ class UIHandler(BaseHTTPRequestHandler):
                 weight = n.get('weight', 0)
                 is_local = 'doc' in n  # overlay edges include doc field
                 doc = n.get('doc') if is_local else None
+                line = n.get('line') if is_local else None
+                snippet = n.get('snippet') if is_local else None
                 
                 if is_local and doc_filter and doc != doc_filter:
                     continue
@@ -2720,13 +2738,20 @@ class UIHandler(BaseHTTPRequestHandler):
                 if not label:
                     label = h8[:12] + '...'
                 
-                neighbors.append({
+                neighbor_data = {
                     'hash8': h8,
                     'label': label,
                     'weight': weight,
                     'source': source,
                     'doc': doc
-                })
+                }
+                # Include provenance if available
+                if line is not None:
+                    neighbor_data['line'] = line
+                if snippet:
+                    neighbor_data['snippet'] = snippet
+                
+                neighbors.append(neighbor_data)
             
             # Sort: local first, then by weight
             neighbors.sort(key=lambda x: (0 if x['source'] == 'local' else 1, -abs(x['weight'])))
