@@ -42,6 +42,58 @@ def tokenize_simple(text: str) -> List[str]:
     return words
 
 
+def tokenize_with_positions(text: str) -> List[tuple]:
+    """
+    Tokenize text with position tracking for provenance.
+    
+    Returns: [(word, line, char_start, char_end), ...]
+    
+    Theory: Store coordinates, not content (MDL/Invariant III).
+    """
+    results = []
+    lines = text.split('\n')
+    char_offset = 0
+    
+    for line_num, line in enumerate(lines, 1):
+        for match in re.finditer(r'\b[a-zA-Z]{3,}\b', line):
+            word = match.group().lower()
+            char_start = char_offset + match.start()
+            char_end = char_offset + match.end()
+            results.append((word, line_num, char_start, char_end))
+        char_offset += len(line) + 1  # +1 for newline
+    
+    return results
+
+
+def get_snippet(text: str, char_start: int, char_end: int, context: int = 30) -> str:
+    """
+    Extract snippet around a character span.
+    
+    Returns ~10 words of context, with the target highlighted.
+    """
+    # Get context before and after
+    start = max(0, char_start - context)
+    end = min(len(text), char_end + context)
+    
+    snippet = text[start:end]
+    
+    # Clean up to word boundaries
+    if start > 0:
+        first_space = snippet.find(' ')
+        if first_space > 0:
+            snippet = '...' + snippet[first_space+1:]
+    
+    if end < len(text):
+        last_space = snippet.rfind(' ')
+        if last_space > 0:
+            snippet = snippet[:last_space] + '...'
+    
+    # Clean whitespace
+    snippet = ' '.join(snippet.split())
+    
+    return snippet
+
+
 def get_anchors(
     client: HaloPhysics, 
     words: List[str], 
@@ -138,30 +190,51 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             print(f"  Error reading: {e}")
             continue
         
-        # Tokenize and find anchors
-        words = tokenize_simple(text)
+        # Tokenize WITH positions for provenance tracking (Invariant III: MDL)
+        tokens_with_pos = tokenize_with_positions(text)
+        
+        # Get list of words to check for anchors
+        words = [w for w, _, _, _ in tokens_with_pos]
         anchors = get_anchors(client, words)
+        anchor_words = {w for w, _, _ in anchors}
         
-        print(f"  Words: {len(words)}, Anchors: {len(anchors)}")
+        # Filter to only anchor tokens (with their positions)
+        anchor_tokens = [(w, line, cs, ce) for w, line, cs, ce in tokens_with_pos 
+                         if w in anchor_words]
         
-        if len(anchors) < 2:
+        print(f"  Words: {len(words)}, Anchors: {len(anchor_tokens)}")
+        
+        if len(anchor_tokens) < 2:
             print(f"  Skipping (too few anchors)")
             continue
         
-        # Create edges between consecutive anchors (simple linear chain)
-        # This is a simplified compiler - just connects anchor pairs
+        # Create edges between consecutive anchors with provenance coordinates
         doc_name = str(file_path.relative_to(input_path) if input_path.is_dir() else file_path.name)
         
-        for i in range(len(anchors) - 1):
-            src_word, src_hash, src_mass = anchors[i]
-            tgt_word, tgt_hash, tgt_mass = anchors[i + 1]
+        for i in range(len(anchor_tokens) - 1):
+            src_word, src_line, src_cs, src_ce = anchor_tokens[i]
+            tgt_word, tgt_line, tgt_cs, tgt_ce = anchor_tokens[i + 1]
             
-            overlay.add_edge(src_hash, tgt_hash, weight=1.0, doc=doc_name)
+            src_hash = hash8_hex(f"Ġ{src_word}")
+            tgt_hash = hash8_hex(f"Ġ{tgt_word}")
+            
+            # Create snippet that spans both words (for human verification)
+            snippet = get_snippet(text, src_cs, tgt_ce, context=20)
+            
+            overlay.add_edge(
+                src_hash, tgt_hash, 
+                weight=1.0, 
+                doc=doc_name,
+                ring="sigma",
+                line=src_line,
+                span=(src_cs, tgt_ce),
+                snippet=snippet
+            )
             overlay.define_label(src_hash, src_word)
             overlay.define_label(tgt_hash, tgt_word)
             total_edges += 1
         
-        print(f"  Added {len(anchors) - 1} edges")
+        print(f"  Added {len(anchor_tokens) - 1} edges with provenance")
     
     # Save overlay
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -216,11 +289,17 @@ def cmd_verify(args: argparse.Namespace) -> int:
                 print(f"  {i}. {src}")
         print()
         if result.path:
-            print("Path:")
+            print("Path (with provenance):")
             for edge in result.path:
                 tgt_label = client._overlay.get_label(edge.get("hash8", "")) or edge.get("hash8", "")[:8]
                 doc = edge.get("doc", "?")
-                print(f"  → {tgt_label} (from {doc})")
+                line = edge.get("line", "?")
+                snippet = edge.get("snippet", "")
+                
+                print(f"  → {tgt_label}")
+                print(f"      📄 {doc}:{line}")
+                if snippet:
+                    print(f"      \"{snippet}\"")
     else:
         print("❌ UNVERIFIED (η = hypothesis)")
         print("=" * 50)
