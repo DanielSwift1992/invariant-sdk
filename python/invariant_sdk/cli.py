@@ -176,6 +176,90 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_verify(args: argparse.Namespace) -> int:
+    """Verify if an assertion has σ-proof (documentary evidence)."""
+    subject = args.subject
+    obj = args.object
+    
+    print("Invariant Verify (σ-proof check)")
+    print(f"  Subject: \"{subject}\"")
+    print(f"  Object: \"{obj}\"")
+    print()
+    
+    # Connect to server with overlay
+    client = HaloPhysics(args.server, auto_discover_overlay=True)
+    
+    if not client._overlay:
+        print("❌ No overlay found.")
+        print()
+        print("Create one with: inv ingest ./docs")
+        return 1
+    
+    print(f"  Crystal: {client.crystal_id}")
+    print(f"  Overlay: {client._overlay.n_edges} edges, {len(client._overlay.labels)} labels")
+    print()
+    
+    # Run verification
+    result = client.verify(subject, obj)
+    
+    # Pretty-print result
+    print("=" * 50)
+    if result.proven:
+        print("✓ σ-PROVEN")
+        print("=" * 50)
+        print()
+        print("This assertion is supported by documentary evidence.")
+        print()
+        if result.sources:
+            print("Sources:")
+            for i, src in enumerate(result.sources, 1):
+                print(f"  {i}. {src}")
+        print()
+        if result.path:
+            print("Path:")
+            for edge in result.path:
+                tgt_label = client._overlay.get_label(edge.get("hash8", "")) or edge.get("hash8", "")[:8]
+                doc = edge.get("doc", "?")
+                print(f"  → {tgt_label} (from {doc})")
+    else:
+        print("❌ UNVERIFIED (η = hypothesis)")
+        print("=" * 50)
+        print()
+        print(result.message)
+        print()
+        print("Subject hash:", result.subject_hash[:12] + "...")
+        print("Object hash:", result.object_hash[:12] + "...")
+        print()
+        
+        # Show what global crystal knows (context, not proof)
+        try:
+            concept = client.resolve(subject)
+            if concept.halo:
+                print("Global crystal context (α, not proof):")
+                for n in concept.halo[:5]:
+                    token = n.get("token", n.get("hash8", "")[:8])
+                    weight = n.get("weight", 0)
+                    print(f"  - {token} (w={weight:.2f})")
+        except Exception:
+            pass
+        
+        print()
+        print("To add documentary evidence: inv ingest <path-to-documents>")
+    
+    # Show conflicts if any
+    if result.conflicts:
+        print()
+        print("⚠️  CONFLICTS DETECTED:")
+        for conflict in result.conflicts:
+            e1 = conflict.get("edge1", {})
+            e2 = conflict.get("edge2", {})
+            print(f"  - {e1.get('doc', '?')} says {e1.get('weight', 0)}")
+            print(f"    vs {e2.get('doc', '?')} says {e2.get('weight', 0)}")
+    
+    print()
+    return 0 if result.proven else 2
+
+
 def cmd_ask(args: argparse.Namespace) -> int:
     """Ask a question using global + local knowledge."""
     query = args.query
@@ -364,6 +448,20 @@ def main() -> int:
         help="Show current overlay status"
     )
     
+    # verify command
+    verify_parser = subparsers.add_parser(
+        "verify",
+        help="Verify if an assertion has σ-proof (documentary evidence)"
+    )
+    verify_parser.add_argument(
+        "subject",
+        help="Subject of assertion (e.g., 'contract')"
+    )
+    verify_parser.add_argument(
+        "object",
+        help="Object of assertion (e.g., '5 years')"
+    )
+    
     # ui command
     ui_parser = subparsers.add_parser(
         "ui",
@@ -388,6 +486,8 @@ def main() -> int:
         return cmd_ask(args)
     elif args.command == "info":
         return cmd_info(args)
+    elif args.command == "verify":
+        return cmd_verify(args)
     elif args.command == "ui":
         return cmd_ui(args)
     
