@@ -397,7 +397,7 @@ HTML_PAGE = '''<!DOCTYPE html>
     
     <div class="status-bar">
         <span>Crystal: <strong>$$CRYSTAL_ID$$</strong></span>
-        <span><a href="/graph" style="color:#58a6ff">📊 View Graph</a></span>
+        <span><a href="/graph" style="color:#58a6ff">📊 2D</a> | <a href="/graph3d" style="color:#58a6ff">🌐 3D</a></span>
         <span class="status-local">$$OVERLAY_STATUS$$</span>
     </div>
 
@@ -636,6 +636,8 @@ class UIHandler(BaseHTTPRequestHandler):
             self.serve_page()
         elif parsed.path == '/graph':
             self.serve_graph_page()
+        elif parsed.path == '/graph3d':
+            self.serve_graph3d_page()
         elif parsed.path == '/api/search':
             self.api_search(parsed.query)
         elif parsed.path == '/api/suggest':
@@ -938,6 +940,101 @@ class UIHandler(BaseHTTPRequestHandler):
                         })
         
         self.send_json({'nodes': nodes, 'edges': edges})
+    
+    def serve_graph3d_page(self):
+        """Serve 3D graph visualization page with Three.js."""
+        overlay = UIHandler.overlay
+        node_count = len(overlay.labels) if overlay else 0
+        edge_count = overlay.n_edges if overlay else 0
+        
+        graph3d_html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>3D Graph — Invariant</title>
+    <script src="https://unpkg.com/3d-force-graph@1"></script>
+    <style>
+        * {{ margin: 0; padding: 0; }}
+        body {{ 
+            font-family: -apple-system, sans-serif;
+            background: #0d1117;
+            color: #e6edf3;
+            overflow: hidden;
+        }}
+        #graph3d {{ width: 100vw; height: 100vh; }}
+        #info {{
+            position: fixed;
+            top: 20px;
+            left: 20px;
+            background: rgba(22, 27, 34, 0.95);
+            padding: 16px;
+            border-radius: 8px;
+            border: 1px solid #30363d;
+            z-index: 100;
+            max-width: 280px;
+        }}
+        #info h2 {{ color: #58a6ff; margin-bottom: 12px; font-size: 18px; }}
+        #info p {{ font-size: 12px; color: #8b949e; margin: 4px 0; }}
+        #info a {{ color: #58a6ff; }}
+        .legend {{ display: flex; gap: 12px; margin-top: 12px; font-size: 11px; }}
+        .legend span {{ display: flex; align-items: center; gap: 4px; }}
+        .dot {{ width: 10px; height: 10px; border-radius: 50%; }}
+    </style>
+</head>
+<body>
+    <div id="info">
+        <h2>◆ 3D Knowledge Graph</h2>
+        <p>Nodes: <strong>{node_count}</strong> | Edges: <strong>{edge_count}</strong></p>
+        <p style="margin-top: 8px; font-size: 11px; color: #484f58;">
+            🖱️ Drag to rotate | Scroll to zoom | Click node to search
+        </p>
+        <div class="legend">
+            <span><div class="dot" style="background:#58a6ff"></div> Solid (anchor)</span>
+            <span><div class="dot" style="background:#484f58"></div> Gas (common)</span>
+        </div>
+        <p style="margin-top: 12px;">
+            <a href="/graph">2D View</a> | <a href="/">Search</a>
+        </p>
+    </div>
+    
+    <div id="graph3d"></div>
+    
+    <script>
+        fetch('/api/graph')
+            .then(res => res.json())
+            .then(data => {{
+                const Graph = ForceGraph3D()
+                    (document.getElementById('graph3d'))
+                    .backgroundColor('#0d1117')
+                    .graphData({{
+                        nodes: data.nodes,
+                        links: data.edges.map(e => ({{
+                            source: e.source,
+                            target: e.target,
+                            value: e.weight
+                        }}))
+                    }})
+                    .nodeLabel(n => `${{n.label}}\\nMass: ${{n.mass.toFixed(3)}}\\nPhase: ${{n.phase}}`)
+                    .nodeVal(n => Math.sqrt(n.mass) * 10 + 2)
+                    .nodeColor(n => n.phase === 'solid' ? '#58a6ff' : '#484f58')
+                    .nodeOpacity(0.9)
+                    .linkWidth(l => l.value * 2 + 0.5)
+                    .linkOpacity(0.4)
+                    .linkColor(() => '#30363d')
+                    .onNodeClick(n => {{
+                        window.location.href = '/?q=' + encodeURIComponent(n.label);
+                    }})
+                    .d3Force('charge', d3.forceManyBody().strength(n => -n.mass * 200))
+                    .d3Force('link', d3.forceLink().distance(50).strength(l => l.value * 0.3));
+                
+                // Auto-rotate slowly
+                Graph.controls().autoRotate = true;
+                Graph.controls().autoRotateSpeed = 0.5;
+            }});
+    </script>
+</body>
+</html>'''
+        self.send_html(graph3d_html)
     
     def api_search(self, query_string: str):
         params = urllib.parse.parse_qs(query_string)
