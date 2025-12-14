@@ -754,31 +754,42 @@ def ingest(file_path: str) -> str:
     if path.is_file():
         files = [path]
     else:
-        # Recursively find code files
-        all_files = (
-            list(path.rglob("*.py")) +
-            list(path.rglob("*.md")) +
-            list(path.rglob("*.txt"))
-        )
+        # Helper: Check if file is text (UTF-8 decodable)
+        # Theory: Observable property, not heuristic - works for ALL languages
+        def is_text_file(file_path: Path) -> bool:
+            if not file_path.is_file():
+                return False
+            try:
+                # Read first 512 bytes to check (optimization)
+                with open(file_path, 'rb') as f:
+                    sample = f.read(512)
+                # Try decode as UTF-8
+                sample.decode('utf-8', errors='strict')
+                return True
+            except (UnicodeDecodeError, OSError):
+                return False
         
-        # Filter using .gitignore if present (Theory: Explicit user declaration, not heuristic)
+        # Find ALL files (no extension filtering)
+        all_files = [f for f in path.rglob("*") if f.is_file()]
+        
+        # Filter using .gitignore if present (Theory: Explicit user declaration)
         gitignore_path = path / '.gitignore'
         if gitignore_path.exists():
             try:
                 import pathspec
                 gitignore_text = gitignore_path.read_text(encoding='utf-8')
                 spec = pathspec.PathSpec.from_lines('gitwildmatch', gitignore_text.splitlines())
-                # Filter out gitignored files
-                files = [f for f in all_files if not spec.match_file(str(f.relative_to(path)))]
+                files_after_gitignore = [f for f in all_files if not spec.match_file(str(f.relative_to(path)))]
             except Exception:
-                # If .gitignore parsing fails, use all files
-                files = all_files
+                files_after_gitignore = all_files
         else:
-            # No .gitignore → index everything (honest, user made no declaration)
-            files = all_files
+            files_after_gitignore = all_files
+        
+        # Filter to text files only (UTF-8 decodable)
+        files = [f for f in files_after_gitignore if is_text_file(f)]
         
         if not files:
-            return json.dumps({"error": f"No .py/.md/.txt files found in {file_path}"})
+            return json.dumps({"error": f"No text files found in {file_path}"})
     
     
     # Process all files

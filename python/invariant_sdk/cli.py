@@ -174,11 +174,24 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     print()
     
     
+    # Helper: Check if file is text (UTF-8 decodable)
+    def is_text_file(file_path: Path) -> bool:
+        if not file_path.is_file():
+            return False
+        try:
+            with open(file_path, 'rb') as f:
+                sample = f.read(512)
+            sample.decode('utf-8', errors='strict')
+            return True
+        except (UnicodeDecodeError, OSError):
+            return False
+    
     # Collect files
     if input_path.is_file():
         files = [input_path]
     else:
-        all_files = list(input_path.rglob("*.txt")) + list(input_path.rglob("*.md")) + list(input_path.rglob("*.py"))
+        # Find ALL files (no extension filtering)
+        all_files = [f for f in input_path.rglob("*") if f.is_file()]
         
         # Filter using .gitignore if present (Theory: Explicit user declaration)
         gitignore_path = input_path / '.gitignore'
@@ -187,11 +200,14 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 import pathspec
                 gitignore_text = gitignore_path.read_text(encoding='utf-8')
                 spec = pathspec.PathSpec.from_lines('gitwildmatch', gitignore_text.splitlines())
-                files = [f for f in all_files if not spec.match_file(str(f.relative_to(input_path)))]
+                files_after_gitignore = [f for f in all_files if not spec.match_file(str(f.relative_to(input_path)))]
             except Exception:
-                files = all_files
+                files_after_gitignore = all_files
         else:
-            files = all_files
+            files_after_gitignore = all_files
+        
+        # Filter to text files only
+        files = [f for f in files_after_gitignore if is_text_file(f)]
     
     print(f"Found {len(files)} files to process")
     print()
