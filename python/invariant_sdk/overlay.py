@@ -189,12 +189,23 @@ class OverlayGraph:
     
     def merge(self, other: "OverlayGraph") -> None:
         """Merge another overlay into this one (other takes priority)."""
+        # Merge edges + keep conflicts (cascade load previously dropped them).
+        # Conflict heuristic (current implementation): same src->tgt seen with different provenance/weight.
+        # NOTE: This is not the full σ-Conflict definition from INVARIANTS.md (which requires a predicate).
         for src, edge_list in other.edges.items():
+            existing = self.edges.get(src, [])
+            for new_edge in edge_list:
+                for e in existing:
+                    if e.tgt != new_edge.tgt:
+                        continue
+                    if e.doc != new_edge.doc or abs(e.weight - new_edge.weight) > 0.01:
+                        self.conflicts.append((e, new_edge))
             self.edges[src].extend(edge_list)
         
         self.suppressed.update(other.suppressed)
         self.labels.update(other.labels)
         self.sources.update(other.sources)
+        self.conflicts.extend(other.conflicts)
     
     def save(self, path: Path) -> None:
         """Save overlay to .jsonl file."""
