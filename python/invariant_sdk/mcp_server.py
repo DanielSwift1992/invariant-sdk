@@ -722,16 +722,22 @@ def context(doc: str, line: int, ctx_hash: Optional[str] = None) -> str:
 @mcp.tool()
 def ingest(file_path: str) -> str:
     """
-    Index a file into the local overlay.
+    Index files or folders into the local overlay.
     
-    This creates σ-facts (grounded observations) from the document.
-    Use this when you want to add a new file to the knowledge base.
+    This creates σ-facts (grounded observations) from documents.
+    
+    **FOR SWE-BENCH:** Point this at the repository root to index all Python files.
     
     Args:
-        file_path: Path to the file to ingest
+        file_path: Path to file OR folder to ingest
+                   Folders: recursively finds .py, .md, .txt files
     
     Returns:
-        JSON with stats: edges added, anchors found, etc.
+        JSON with stats: files processed, edges added, anchors found
+    
+    Example:
+        ingest("/path/to/repo")  # Indexes the entire repo
+        ingest("utils.py")        # Indexes single file
     """
     _ensure_initialized()
     import hashlib
@@ -742,107 +748,138 @@ def ingest(file_path: str) -> str:
     
     path = Path(file_path)
     if not path.exists():
-        return json.dumps({"error": f"File not found: {file_path}"})
+        return json.dumps({"error": f"Path not found: {file_path}"})
     
-    try:
-        text = path.read_text(encoding='utf-8')
-    except Exception as e:
-        return json.dumps({"error": f"Cannot read file: {e}"})
-    
-    # Tokenize with positions
-    tokens = []
-    lines = text.split('\n')
-    for line_num, line_text in enumerate(lines, 1):
-        for match in re.finditer(r'\b[a-zA-Z]{3,}\b', line_text):
-            tokens.append((match.group().lower(), line_num))
-    
-    words = [w for w, _ in tokens]
-    unique_words = list(dict.fromkeys(words))[:500]
-    
-    if len(unique_words) < 2:
-        return json.dumps({"error": "Too few words in document"})
-    
-    # Find anchors via crystal
-    word_to_hash = {w: hash8_hex(f"Ġ{w}") for w in unique_words}
-    
-    try:
-        batch_results = _physics._client.get_halo_pages(word_to_hash.values(), limit=0)
-    except Exception as e:
-        return json.dumps({"error": f"Crystal server error: {e}"})
-    
-    mean_mass = _physics.mean_mass
-    candidates = []
-    for word in unique_words:
-        h8 = word_to_hash.get(word)
-        if not h8:
-            continue
-        result = batch_results.get(h8) or {}
-        if not result.get('exists'):
-            continue
-        meta = result.get('meta') or {}
-        degree_total = int(meta.get('degree_total') or 0)
-        mass = 1.0 / math.log(2 + max(0, degree_total)) if degree_total > 0 else 0
-        candidates.append((word, h8, mass))
-    
-    # Select anchors
-    solid = [(w, h8) for w, h8, m in candidates if m > mean_mass]
-    if len(solid) >= 2:
-        anchors = solid
+    # Collect files (support both single file and folder)
+    if path.is_file():
+        files = [path]
     else:
-        top = sorted(candidates, key=lambda x: x[2], reverse=True)[:64]
-        top_set = {h8 for _, h8, _ in top}
-        anchors = [(w, h8) for w, h8, _ in candidates if h8 in top_set]
-    
-    if len(anchors) < 2:
-        return json.dumps({"error": "Too few anchors found"})
-    
-    anchor_words = {w for w, _ in anchors}
-    
-    # Collect occurrences
-    def compute_ctx_hash(idx: int, k: int = 2) -> str:
-        start = max(0, idx - k)
-        end = min(len(tokens), idx + k + 1)
-        window = [tokens[i][0] for i in range(start, end)]
-        normalized = ' '.join(w.lower() for w in window)
-        return hashlib.sha256(normalized.encode('utf-8')).hexdigest()[:8]
-    
-    occurrences = []
-    for idx, (word, line_num) in enumerate(tokens):
-        if word in anchor_words:
-            h8 = word_to_hash.get(word) or hash8_hex(f"Ġ{word}")
-            occurrences.append((word, h8, line_num, compute_ctx_hash(idx)))
-    
-    if len(occurrences) < 2:
-        return json.dumps({"error": "Too few anchor occurrences"})
-    
-    # Create edges
-    doc_name = path.name
-    edges_added = 0
-    
-    for i in range(len(occurrences) - 1):
-        src_word, src_h8, _, _ = occurrences[i]
-        tgt_word, tgt_h8, tgt_line, tgt_ctx = occurrences[i + 1]
-        
-        _overlay.add_edge(
-            src_h8, tgt_h8,
-            weight=1.0,
-            doc=doc_name,
-            line=tgt_line,
-            ctx_hash=tgt_ctx,
+        # Recursively find code files
+        files = (
+            list(path.rglob("*.py")) +
+            list(path.rglob("*.md")) +
+            list(path.rglob("*.txt"))
         )
-        _overlay.define_label(src_h8, src_word)
-        _overlay.define_label(tgt_h8, tgt_word)
-        edges_added += 1
+        if not files:
+            return json.dumps({"error": f"No .py/.md/.txt files found in {file_path}"})
     
-    # Save
+    
+    # Process all files
+    total_files = len(files)
+    total_edges = 0
+    total_anchors_found = 0
+    files_processed = 0
+    
+    for file_path_obj in files:
+        try:
+            text = file_path_obj.read_text(encoding='utf-8')
+        except Exception:
+            continue
+        
+        # Tokenize with positions
+        tokens = []
+        lines = text.split('\n')
+        for line_num, line_text in enumerate(lines, 1):
+            for match in re.finditer(r'\b[a-zA-Z]{3,}\b', line_text):
+                tokens.append((match.group().lower(), line_num))
+        
+        words = [w for w, _ in tokens]
+        unique_words = list(dict.fromkeys(words))[:500]
+        
+        if len(unique_words) < 2:
+            continue
+        
+        # Find anchors via crystal
+        word_to_hash = {w: hash8_hex(f"Ġ{w}") for w in unique_words}
+        
+        try:
+            batch_results = _physics._client.get_halo_pages(word_to_hash.values(), limit=0)
+        except Exception:
+            continue
+        
+        mean_mass = _physics.mean_mass
+        candidates = []
+        for word in unique_words:
+            h8 = word_to_hash.get(word)
+            if not h8:
+                continue
+            result = batch_results.get(h8) or {}
+            if not result.get('exists'):
+                # Unknown words = Local Anchors (solid)
+                candidates.append((word, h8, 1.0))
+                continue
+            meta = result.get('meta') or {}
+            degree_total = int(meta.get('degree_total') or 0)
+            mass = 1.0 / math.log(2 + max(0, degree_total)) if degree_total > 0 else 0
+            candidates.append((word, h8, mass))
+        
+        # Select anchors
+        solid = [(w, h8) for w, h8, m in candidates if m > mean_mass]
+        if len(solid) >= 2:
+            anchors = solid
+        else:
+            top = sorted(candidates, key=lambda x: x[2], reverse=True)[:64]
+            top_set = {h8 for _, h8, _ in top}
+            anchors = [(w, h8) for w, h8, _ in candidates if h8 in top_set]
+        
+        if len(anchors) < 2:
+            continue
+        
+        anchor_words = {w for w, _ in anchors}
+        
+        # Collect occurrences
+        def compute_ctx_hash(idx: int, k: int = 2) -> str:
+            start = max(0, idx - k)
+            end = min(len(tokens), idx + k + 1)
+            window = [tokens[i][0] for i in range(start, end)]
+            normalized = ' '.join(w.lower() for w in window)
+            return hashlib.sha256(normalized.encode('utf-8')).hexdigest()[:8]
+        
+        occurrences = []
+        for idx, (word, line_num) in enumerate(tokens):
+            if word in anchor_words:
+                h8 = word_to_hash.get(word) or hash8_hex(f"Ġ{word}")
+                occurrences.append((word, h8, line_num, compute_ctx_hash(idx)))
+        
+        if len(occurrences) < 2:
+            continue
+        
+        # Create edges
+        doc_name = file_path_obj.name
+        edges_added = 0
+        
+        for i in range(len(occurrences) - 1):
+            src_word, src_h8, _, _ = occurrences[i]
+            tgt_word, tgt_h8, tgt_line, tgt_ctx = occurrences[i + 1]
+            
+            _overlay.add_edge(
+                src_h8, tgt_h8,
+                weight=1.0,
+                doc=doc_name,
+                ring="sigma",  # All document edges are σ (facts)
+                phase="solid",
+                line=tgt_line,
+                ctx_hash=tgt_ctx,
+            )
+            _overlay.define_label(src_h8, src_word)
+            _overlay.define_label(tgt_h8, tgt_word)
+            edges_added += 1
+        
+        total_edges += edges_added
+        total_anchors_found += len(anchor_words)
+        files_processed += 1
+    
+    # Save overlay
     _overlay_path.parent.mkdir(parents=True, exist_ok=True)
     _overlay.save(_overlay_path)
     
     return json.dumps({
         "success": True,
-        "file": file_path,
-        "edges": edges_added,
-        "anchors": len(anchor_words),
+        "path": file_path,
+        "total_files": total_files,
+        "files_processed": files_processed,
+        "total_edges": total_edges,
+        "total_anchors": total_anchors_found,
         "overlay_path": str(_overlay_path),
     }, indent=2)
 
