@@ -141,22 +141,33 @@ def semantic_map(file_path: str) -> str:
     
     # Get mass info for key concepts
     anchors = []
-    for node_label in list(nodes_in_doc)[:20]:  # Top 20
-        # Find hash for this label
-        node_hash = None
-        for h, l in _overlay.labels.items():
-            if l == node_label:
-                node_hash = h
-                break
+    if _physics and nodes_in_doc:
+        # Collect hashes for batch lookup
+        hash_to_label = {}
+        for node_label in list(nodes_in_doc)[:20]:
+            for h, l in _overlay.labels.items():
+                if l == node_label:
+                    hash_to_label[h] = node_label
+                    break
         
-        if node_hash and _physics:
-            mass = _physics.get_mass(node_hash)
-            phase = "solid" if mass > _physics.mean_mass else "gas"
-            anchors.append({
-                "word": node_label,
-                "mass": round(mass, 4),
-                "phase": phase,
-            })
+        if hash_to_label:
+            try:
+                import math
+                batch_results = _physics._client.get_halo_pages(hash_to_label.keys(), limit=0)
+                for h8, label in hash_to_label.items():
+                    result = batch_results.get(h8) or {}
+                    if result.get('exists'):
+                        meta = result.get('meta') or {}
+                        degree_total = int(meta.get('degree_total') or 0)
+                        mass = 1.0 / math.log(2 + max(0, degree_total)) if degree_total > 0 else 0
+                        phase = "solid" if mass > _physics.mean_mass else "gas"
+                        anchors.append({
+                            "word": label,
+                            "mass": round(mass, 4),
+                            "phase": phase,
+                        })
+            except Exception:
+                pass
     
     anchors.sort(key=lambda a: a["mass"], reverse=True)
     
