@@ -3,8 +3,8 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "invariant-sdk"
-version = "34.2.0"
+name = "invarianthub"
+version = "1.0.0"
 description = "Deterministic Knowledge Engine - Semantic Kernel for LLM Agents"
 readme = "README.md"
 license = {text = "MIT"}
