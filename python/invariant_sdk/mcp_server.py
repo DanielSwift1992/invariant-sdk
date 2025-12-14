@@ -148,105 +148,94 @@ def locate(issue_text: str, max_results: int = 0) -> str:
     import math
     from invariant_sdk.cli import hash8_hex
     
-    # Extract seed terms from issue text
-    # Prefer: class names (CamelCase), function names, module paths
-    # Filter: stopwords, short words
+    # Extract ALL words from issue text (universal tokenization)
+    # Let the crystal classify them by mass (solid vs gas)
+    # NO heuristics: no stopwords, no programming-specific patterns
     
-    seeds = []
-    
-    # CamelCase (likely class names): SomethingError, MyClass
-    for m in re.finditer(r'\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b', issue_text):
-        seeds.append(m.group().lower())
-    
-    # snake_case (likely function/method names): some_function
-    for m in re.finditer(r'\b[a-z]+(?:_[a-z]+)+\b', issue_text):
-        seeds.append(m.group())
-    
-    # Module paths: foo.bar.baz
-    for m in re.finditer(r'\b[a-z_][a-z0-9_]*(?:\.[a-z_][a-z0-9_]*)+\b', issue_text):
-        parts = m.group().split('.')
-        seeds.extend(parts)
-    
-    # Regular words (3+ chars, not stopwords)
-    stopwords = {'the', 'and', 'for', 'are', 'was', 'were', 'been', 'being', 
-                 'have', 'has', 'had', 'does', 'did', 'will', 'would', 'could',
-                 'should', 'may', 'might', 'must', 'shall', 'can', 'need',
-                 'this', 'that', 'these', 'those', 'with', 'from', 'into',
-                 'during', 'before', 'after', 'above', 'below', 'between',
-                 'but', 'not', 'only', 'same', 'than', 'too', 'very'}
-    
-    for m in re.finditer(r'\b[a-zA-Z]{4,}\b', issue_text):
-        word = m.group().lower()
-        if word not in stopwords:
-            seeds.append(word)
+    words = []
+    for m in re.finditer(r'\b[a-zA-Z]{3,}\b', issue_text):
+        words.append(m.group().lower())
     
     # Deduplicate, keep order
     seen = set()
-    unique_seeds = []
-    for s in seeds:
-        if s not in seen:
-            seen.add(s)
-            unique_seeds.append(s)
+    unique_words = []
+    for w in words:
+        if w not in seen:
+            seen.add(w)
+            unique_words.append(w)
     
-    if not unique_seeds:
-        return json.dumps({"error": "No searchable terms found in issue_text"})
+    if not unique_words:
+        return json.dumps({"error": "No words found in issue_text"})
     
-    # Hash seeds
-    seed_hashes = {s: hash8_hex(f"Ġ{s}") for s in unique_seeds[:30]}  # Limit seeds
+    # Hash words and get mass from crystal
+    word_hashes = {w: hash8_hex(f"Ġ{w}") for w in unique_words}
     
-    # Classify seeds by mass (solid vs gas)
+    # Classify by mass: solid (anchor) vs gas (noise)
+    # Theory: Mass = 1/log(2+degree), Solid = mass > mean_mass
+    # Words not in crystal = unknown (we cannot judge them)
     solid_seeds = []
     gas_seeds = []
+    unknown_words = []
     
     try:
-        batch_results = _physics._client.get_halo_pages(seed_hashes.values(), limit=0)
-        for seed, h8 in seed_hashes.items():
+        batch_results = _physics._client.get_halo_pages(word_hashes.values(), limit=0)
+        for word, h8 in word_hashes.items():
             result = batch_results.get(h8) or {}
             if result.get('exists'):
                 meta = result.get('meta') or {}
                 degree = int(meta.get('degree_total') or 0)
                 mass = 1.0 / math.log(2 + max(0, degree)) if degree > 0 else 0
                 if mass > _physics.mean_mass:
-                    solid_seeds.append((seed, h8, mass))
+                    solid_seeds.append((word, h8, mass))
                 else:
-                    gas_seeds.append((seed, h8, mass))
-    except Exception:
-        # Fallback: treat all as solid
-        solid_seeds = [(s, h, 0.5) for s, h in seed_hashes.items()]
+                    gas_seeds.append((word, h8, mass))
+            else:
+                unknown_words.append(word)
+    except Exception as e:
+        return json.dumps({"error": f"Crystal connection failed: {e}"})
     
-    # Interference: find files containing multiple seeds
-    # Score = number of distinct solid seeds found
-    file_scores = {}  # doc -> {score, seeds, lines}
+    # Create lookup for all query words
+    all_seeds = solid_seeds + gas_seeds
+    seed_lookup = {h8: (word, mass) for word, h8, mass in all_seeds}
+    word_lookup = {word: (h8, mass) for word, h8, mass in all_seeds}
+    
+    # Interference: find files containing multiple query words
+    file_scores = {}  # doc -> {solid_count, gas_count, words, lines}
     
     for src, edges in _overlay.edges.items():
-        src_label = _overlay.get_label(src) or ""
+        src_label = (_overlay.get_label(src) or "").lower()
         for edge in edges:
             if not edge.doc:
                 continue
-            tgt_label = _overlay.get_label(edge.tgt) or ""
+            tgt_label = (_overlay.get_label(edge.tgt) or "").lower()
             
-            # Check which seeds match
-            matched_seeds = []
-            for seed, h8, mass in solid_seeds:
-                if seed == src_label.lower() or seed == tgt_label.lower():
-                    matched_seeds.append(seed)
-                elif src == h8 or edge.tgt == h8:
-                    matched_seeds.append(seed)
+            # Check which query words match
+            matched = []
+            for word, (h8, mass) in word_lookup.items():
+                if word == src_label or word == tgt_label or src == h8 or edge.tgt == h8:
+                    matched.append((word, mass))
             
-            if matched_seeds:
+            if matched:
                 if edge.doc not in file_scores:
-                    file_scores[edge.doc] = {"score": 0, "seeds": set(), "lines": []}
-                file_scores[edge.doc]["seeds"].update(matched_seeds)
+                    file_scores[edge.doc] = {"solid_count": 0, "gas_count": 0, "words": set(), "lines": []}
+                for word, mass in matched:
+                    file_scores[edge.doc]["words"].add(word)
+                    if mass > _physics.mean_mass:
+                        file_scores[edge.doc]["solid_count"] += 1
+                    else:
+                        file_scores[edge.doc]["gas_count"] += 1
                 if edge.line and edge.line not in file_scores[edge.doc]["lines"]:
                     file_scores[edge.doc]["lines"].append(edge.line)
     
-    # Calculate interference score: more seeds = exponentially better
-    # This is the Bisection Law: 2^n where n = number of matching seeds
+    # Calculate score: solid matches = 2^n, gas matches add 1 each
+    # This is theory: solid = high information, gas = low information
     for doc in file_scores:
-        n_seeds = len(file_scores[doc]["seeds"])
-        file_scores[doc]["score"] = 2 ** n_seeds
-        file_scores[doc]["seeds"] = list(file_scores[doc]["seeds"])
-        file_scores[doc]["lines"] = sorted(file_scores[doc]["lines"])[:10]
+        info = file_scores[doc]
+        n_words = len(info["words"])
+        # Score based on number of UNIQUE words matched
+        info["score"] = 2 ** n_words
+        info["words"] = list(info["words"])
+        info["lines"] = sorted(info["lines"])[:10]
     
     # Rank results
     ranked = sorted(file_scores.items(), key=lambda x: x[1]["score"], reverse=True)
@@ -262,15 +251,16 @@ def locate(issue_text: str, max_results: int = 0) -> str:
         results.append({
             "file": doc,
             "score": info["score"],
-            "matching_seeds": info["seeds"],
-            "n_matches": len(info["seeds"]),
+            "matching_words": info["words"],
+            "n_matches": len(info["words"]),
             "candidate_lines": info["lines"],
         })
     
     return json.dumps({
-        "query_seeds": unique_seeds[:10],
-        "solid_seeds": len(solid_seeds),
-        "gas_seeds": len(gas_seeds),
+        "query_words": unique_words,
+        "solid_count": len(solid_seeds),
+        "gas_count": len(gas_seeds),
+        "unknown_count": len(unknown_words),
         "files_found": len(results),
         "results": results,
     }, indent=2)
