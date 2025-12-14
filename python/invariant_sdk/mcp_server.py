@@ -892,11 +892,12 @@ def ingest_python(file_path: str) -> str:
     """
     Index a Python file with structure-aware edges (DEF, IMP).
     
+    NOTE: Creates advisory edges (not σ-proof). AST is structural/Liquid,
+    not semantic/Crystal. Use text-based ingest for σ-edges.
+    
     Creates edges for:
     - Δ_DEF: class_name → file:line, function_name → file:line
     - Δ_IMP: module → imports
-    
-    This is the foundation for locate() to work with code structure.
     
     Args:
         file_path: Path to Python file
@@ -953,7 +954,7 @@ def ingest_python(file_path: str) -> str:
                 doc=doc_name,
                 line=node.lineno,
                 ctx_hash=ctx,
-                ring="sigma",
+                ring="advisory",
             )
             _overlay.define_label(h8, name)
             symbols.append({"type": "class", "name": name, "line": node.lineno})
@@ -973,7 +974,7 @@ def ingest_python(file_path: str) -> str:
                         doc=doc_name,
                         line=item.lineno,
                         ctx_hash=method_ctx,
-                        ring="sigma",
+                        ring="advisory",
                     )
                     _overlay.define_label(method_h8, method_name)
                     edges_added += 1
@@ -994,7 +995,7 @@ def ingest_python(file_path: str) -> str:
                     doc=doc_name,
                     line=node.lineno,
                     ctx_hash=ctx,
-                    ring="sigma",
+                    ring="advisory",
                 )
                 _overlay.define_label(h8, name)
                 symbols.append({"type": "function", "name": name, "line": node.lineno})
@@ -1014,7 +1015,7 @@ def ingest_python(file_path: str) -> str:
                     doc=doc_name,
                     line=node.lineno,
                     ctx_hash=ctx,
-                    ring="sigma",
+                    ring="advisory",
                 )
                 _overlay.define_label(mod_h8, mod_name)
                 edges_added += 1
@@ -1031,7 +1032,7 @@ def ingest_python(file_path: str) -> str:
                     doc=doc_name,
                     line=node.lineno,
                     ctx_hash=ctx,
-                    ring="sigma",
+                    ring="advisory",
                 )
                 _overlay.define_label(mod_h8, mod_name)
                 edges_added += 1

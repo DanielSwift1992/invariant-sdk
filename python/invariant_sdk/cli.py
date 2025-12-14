@@ -177,13 +177,17 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     if input_path.is_file():
         files = [input_path]
     else:
-        files = list(input_path.rglob("*.txt")) + list(input_path.rglob("*.md"))
+        files = list(input_path.rglob("*.txt")) + list(input_path.rglob("*.md")) + list(input_path.rglob("*.py"))
     
     print(f"Found {len(files)} files to process")
     print()
     
-    # Create overlay
-    overlay = OverlayGraph()
+    # Load existing overlay or create new
+    if output_path.exists():
+        overlay = OverlayGraph.load(output_path)
+        print(f"Loaded existing overlay: {overlay.n_edges} edges")
+    else:
+        overlay = OverlayGraph()
     total_edges = 0
     
     for file_path in files:
@@ -206,19 +210,27 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         words = [w for w, _, _, _ in tokens_with_pos]
         unique_words = list(dict.fromkeys(words))[:200]  # Limit for batch query
         
-        # Classify words as solid/gas
+        # Classify words as solid/gas using BATCH API for speed
         word_phases = {}  # word -> 'solid' | 'gas'
         mean_mass = client.mean_mass
         
-        for word in unique_words:
-            h8 = hash8_hex(f"Ġ{word}")
-            try:
-                result = client._client.get_halo_page(h8, limit=1)
-                degree = result.get("meta", {}).get("degree_total", 1)
-                mass = 1.0 / math.log(2 + degree) if degree > 0 else 0.5
-                word_phases[word] = "solid" if mass >= mean_mass else "gas"
-            except Exception:
-                word_phases[word] = "gas"  # Unknown = gas (conservative)
+        # Batch lookup (much faster than individual calls)
+        word_to_hash = {w: hash8_hex(f"Ġ{w}") for w in unique_words}
+        try:
+            batch_results = client._client.get_halo_pages(word_to_hash.values(), limit=0)
+            for word, h8 in word_to_hash.items():
+                result = batch_results.get(h8) or {}
+                if result.get('exists'):
+                    meta = result.get('meta') or {}
+                    degree = int(meta.get('degree_total') or 1)
+                    mass = 1.0 / math.log(2 + degree) if degree > 0 else 0.5
+                    word_phases[word] = "solid" if mass >= mean_mass else "gas"
+                else:
+                    word_phases[word] = "gas"
+        except Exception:
+            # Fallback: treat all as gas (conservative)
+            for word in unique_words:
+                word_phases[word] = "gas"
         
         solid_count = sum(1 for p in word_phases.values() if p == "solid")
         gas_count = len(word_phases) - solid_count
