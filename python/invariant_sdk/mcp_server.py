@@ -891,8 +891,9 @@ def ingest(file_path: str) -> str:
         if len(occurrences) < 2:
             continue
         
-        # Create edges
-        doc_name = file_path_obj.name
+        # Use relative path from ingested folder for doc name (prevents collisions)
+        # e.g., "pkg/utils.py" not "utils.py"
+        doc_name = str(file_path_obj.relative_to(path)) if path.is_dir() else file_path_obj.name
         edges_added = 0
         
         for i in range(len(occurrences) - 1):
