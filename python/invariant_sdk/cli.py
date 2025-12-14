@@ -226,26 +226,27 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                     mass = 1.0 / math.log(2 + degree) if degree > 0 else 0.5
                     word_phases[word] = "solid" if mass >= mean_mass else "gas"
                 else:
-                    word_phases[word] = "gas"
+                    # THEORY FIX: Unknown = Local Anchor (max information)
+                    # Words not in LLM vocabulary are RARE/SPECIFIC to this project
+                    # Names, variables, local terms = highest value anchors
+                    word_phases[word] = "solid"  # Local Anchor!
         except Exception:
-            # Fallback: treat all as gas (conservative)
+            # Fallback: treat all as solid (local anchors)
             for word in unique_words:
-                word_phases[word] = "gas"
+                word_phases[word] = "solid"
         
         solid_count = sum(1 for p in word_phases.values() if p == "solid")
         gas_count = len(word_phases) - solid_count
         print(f"  Words: {len(words)}, Solid: {solid_count}, Gas: {gas_count}")
         
-        if solid_count < 1:
-            print(f"  Skipping (no solid anchors)")
-            continue
+        # No minimum solid check - all documents have value
         
         # Create edges between consecutive tokens
-        # Logic (from INVARIANTS.md):
-        #   solid→solid = σ-edge (full provenance)
-        #   solid→gas = λ-edge (navigation)
-        #   gas→solid = λ-edge (reverse lookup)
-        #   gas→gas = skip (pure noise)
+        # Logic (INVARIANTS.md Hierarchy Law):
+        #   solid→solid = σ-edge (document fact, provable)
+        #   solid→gas = σ-edge (document fact with noise context)
+        #   gas→solid = σ-edge (noise leading to anchor)
+        #   gas→gas = skip (pure noise, no information)
         
         doc_name = str(file_path.relative_to(input_path) if input_path.is_dir() else file_path.name)
         doc_edges = 0
@@ -264,11 +265,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             src_hash = hash8_hex(f"Ġ{src_word}")
             tgt_hash = hash8_hex(f"Ġ{tgt_word}")
             
-            # Determine ring based on phases
-            if src_phase == "solid" and tgt_phase == "solid":
-                ring = "sigma"  # Full σ-proof
-            else:
-                ring = "lambda"  # Navigation edge
+            # ALL document edges are σ (provable facts with doc:line provenance)
+            # gas→gas is already skipped above — remaining edges are observations
+            ring = "sigma"
             
             # Compute ctx_hash for target
             ctx_hash = compute_ctx_hash(tokens_with_pos, i + 1, k=2)
