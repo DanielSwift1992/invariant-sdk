@@ -43,14 +43,103 @@ HTML_PAGE = '''<!DOCTYPE html>
             --danger: #ef4444;
         }
         
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: radial-gradient(900px circle at 15% -10%, rgba(59, 130, 246, 0.14), transparent 55%), var(--bg);
-            color: var(--text);
-            min-height: 100vh;
-            padding: 48px 20px 80px;
-            -webkit-font-smoothing: antialiased;
-        }
+	        body {
+	            font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+	            background: radial-gradient(900px circle at 15% -10%, rgba(59, 130, 246, 0.14), transparent 55%), var(--bg);
+	            color: var(--text);
+	            min-height: 100vh;
+	            padding: 92px 20px 40px;
+	            -webkit-font-smoothing: antialiased;
+	        }
+
+            .nav {
+                position: fixed;
+                top: 0;
+                left: 0;
+                right: 0;
+                z-index: 100;
+                padding: 14px 24px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                background: rgba(10, 10, 11, 0.72);
+                backdrop-filter: blur(12px);
+                border-bottom: 1px solid var(--border);
+            }
+
+            .nav-left {
+                display: flex;
+                align-items: center;
+                gap: 18px;
+                min-width: 0;
+            }
+
+            .nav-logo {
+                display: inline-flex;
+                align-items: center;
+                gap: 10px;
+                font-weight: 600;
+                font-size: 14px;
+                letter-spacing: -0.02em;
+                color: var(--text);
+                text-decoration: none;
+                white-space: nowrap;
+            }
+
+            .nav-logo:hover { opacity: 0.9; }
+
+            .nav-links {
+                display: flex;
+                gap: 14px;
+                align-items: center;
+            }
+
+            .nav-link {
+                font-size: 13px;
+                color: var(--text-2);
+                text-decoration: none;
+                padding: 6px 10px;
+                border-radius: 8px;
+                border: 1px solid transparent;
+            }
+
+            .nav-link:hover {
+                color: var(--text);
+                background: rgba(255,255,255,0.03);
+                border-color: var(--border);
+            }
+
+            .nav-meta {
+                display: flex;
+                gap: 8px;
+                align-items: center;
+                flex-shrink: 0;
+            }
+
+            .chip {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 6px 10px;
+                border-radius: 999px;
+                border: 1px solid var(--border);
+                background: rgba(17, 17, 19, 0.8);
+                font-size: 12px;
+                color: var(--text-2);
+                font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                max-width: 46vw;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .chip strong { color: var(--text); font-weight: 600; }
+
+            .chip.sigma {
+                border-color: rgba(34, 197, 94, 0.22);
+                background: rgba(34, 197, 94, 0.08);
+                color: rgba(34, 197, 94, 0.95);
+            }
         
 	        .container {
 	            max-width: 1100px;
@@ -66,10 +155,16 @@ HTML_PAGE = '''<!DOCTYPE html>
 
 	        .mark { color: var(--accent); }
         
-        .subtitle {
-            color: var(--text-2);
-            margin-bottom: 32px;
-        }
+	        .subtitle {
+	            color: var(--text-2);
+	            margin-bottom: 32px;
+	        }
+
+            .hint {
+                color: var(--text-3);
+                font-size: 12px;
+                margin: 8px 0 18px;
+            }
 
         .toolbar {
             display: flex;
@@ -485,31 +580,34 @@ HTML_PAGE = '''<!DOCTYPE html>
             display: none;
         }
         
-        .status-bar {
-            position: fixed;
-            bottom: 0;
-            left: 0;
-            right: 0;
-            padding: 8px 20px;
-            background: rgba(10,10,11,0.7);
-            backdrop-filter: blur(12px);
-            border-top: 1px solid var(--border);
-            font-size: 12px;
-            color: var(--text-3);
-            display: flex;
-            justify-content: space-between;
-        }
-        
-        .status-local {
-            color: var(--success);
-            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        }
-    </style>
-</head>
-<body>
-	    <div class="container">
-		        <h1><span class="mark">◆</span> Invariant</h1>
-	        <p class="subtitle">Semantic Knowledge Explorer</p>
+            @media (max-width: 820px) {
+                .nav-meta { display: none; }
+            }
+
+            @media (max-width: 560px) {
+                body { padding-top: 86px; }
+                .nav { padding: 12px 16px; }
+                .nav-links { display: none; }
+            }
+	    </style>
+	</head>
+	<body>
+        <nav class="nav">
+            <div class="nav-left">
+                <a class="nav-logo" href="/"><span class="mark">◆</span> Invariant</a>
+                <div class="nav-links">
+                    <a class="nav-link" href="/">Search</a>
+                    <a class="nav-link" href="/doc">Docs</a>
+                    <a class="nav-link" href="/graph3d">3D</a>
+                </div>
+            </div>
+            <div class="nav-meta">
+                <span class="chip">Crystal: <strong>$$CRYSTAL_ID$$</strong></span>
+                <span class="chip sigma">$$OVERLAY_STATUS$$</span>
+            </div>
+        </nav>
+		    <div class="container">
+		        <p class="subtitle" style="margin-top: 4px;">Semantic Knowledge Explorer</p>
 	        
 	        <div class="toolbar">
 		            <div class="toolbar-left">
@@ -519,11 +617,15 @@ HTML_PAGE = '''<!DOCTYPE html>
 		            </div>
 		        </div>
 
-            <div class="doc-picker">
-                <div id="docList" class="doc-list"></div>
-            </div>
-	        
-	        <div class="search-form">
+	            <div class="doc-picker">
+	                <div id="docList" class="doc-list"></div>
+	            </div>
+
+                <div class="hint">
+                    Select a document to filter σ-edges. Hover <span style="color:var(--success);font-weight:600;">📄 σ</span> results to preview source context and open the file.
+                </div>
+		        
+		        <div class="search-form">
 	            <div class="search-wrapper">
 	                <input type="text" class="search-input" id="query" 
 	                       placeholder="Type to search... (suggestions will appear)" autofocus
@@ -552,13 +654,7 @@ HTML_PAGE = '''<!DOCTYPE html>
         </div>
     </div>
     
-	    <div class="status-bar">
-	        <span>Crystal: <strong>$$CRYSTAL_ID$$</strong></span>
-	        <span><a href="/doc" style="color:var(--accent)">📄 Docs</a> | <a href="/graph3d" style="color:var(--accent)">🧬 3D</a></span>
-	        <span class="status-local">$$OVERLAY_STATUS$$</span>
-	    </div>
-
-	    <script>
+		    <script>
 	        const queryInput = document.getElementById('query');
 	        const searchBtn = document.getElementById('searchBtn');
 	        const content = document.getElementById('content');
@@ -950,45 +1046,43 @@ HTML_PAGE = '''<!DOCTYPE html>
                     });
                 });
 	            
-	            // Add hover handlers for lazy context loading
-	            document.querySelectorAll('.result-item.local').forEach(item => {
-	                item.addEventListener('mouseenter', async (e) => {
-	                    const doc = item.dataset.doc;
-	                    const line = item.dataset.line;
-                        const ctxHash = item.dataset.ctxHash;
-	                    if (doc && line) {
-	                        await showContext(item, doc, line, ctxHash);
-	                    }
-	                });
-	            });
+		            // Add hover handlers for lazy context loading
+		            document.querySelectorAll('.result-item.local').forEach(item => {
+		                item.addEventListener('mouseenter', async (e) => {
+		                    const doc = item.dataset.doc;
+		                    const line = item.dataset.line;
+	                        const ctxHash = item.dataset.ctxHash;
+                            const word = safeDecode(item.dataset.word || '') || (item.querySelector('.result-word')?.textContent || '');
+                            const query = String(data.query || queryInput.value || '').trim();
+		                    if (doc && line) {
+		                        await showContext(item, doc, line, ctxHash, word, query);
+		                    }
+		                });
+		            });
 	        }
         
 	        let contextCache = {};
 	        let contextTooltip = null;
             let ctxHideTimer = null;
 	        
-	        async function showContext(element, doc, line, ctxHash) {
+	        async function showContext(element, doc, line, ctxHash, word, query) {
 	            const key = doc + ':' + line + ':' + (ctxHash || '');
 	            
 	            // Check cache
 	            if (!contextCache[key]) {
 	                try {
 	                    let url = '/api/context?doc=' + encodeURIComponent(doc) + '&line=' + encodeURIComponent(line);
-                        if (ctxHash) url += '&ctx_hash=' + encodeURIComponent(ctxHash);
+	                        if (ctxHash) url += '&ctx_hash=' + encodeURIComponent(ctxHash);
 	                    const res = await fetch(url);
 	                    const data = await res.json();
-	                    if (data.content) {
-	                        contextCache[key] = data;
-	                    } else if (data.error) {
-                        contextCache[key] = { content: 'Error: ' + data.error };
-                    }
-                } catch (e) {
-                    contextCache[key] = { content: 'Could not load context' };
-                }
-            }
-            
-            const ctx = contextCache[key];
-            if (!ctx || !ctx.content) return;
+                        contextCache[key] = data || {};
+	                } catch (e) {
+	                    contextCache[key] = { error: 'Could not load context', status: 'broken' };
+	                }
+	            }
+	            
+	            const ctx = contextCache[key];
+	            if (!ctx) return;
             
             // Create or update tooltip
 	            if (!contextTooltip) {
@@ -1027,38 +1121,77 @@ HTML_PAGE = '''<!DOCTYPE html>
 	            contextTooltip.style.top = (rect.bottom + 8) + 'px';
 	            
 	            // Show content with header
-                const status = String(ctx.status || 'unchecked');
-                const statusText =
-                    status === 'fresh' ? '✓ σ-fresh' :
-                    status === 'relocated' ? '↔ σ-relocated' :
-                    status === 'broken' ? '✗ σ-broken' :
-                    '… unchecked';
+	                const status = String(ctx.status || 'unchecked');
+	                const statusText =
+	                    status === 'fresh' ? '✓ σ-fresh' :
+	                    status === 'relocated' ? '↔ σ-relocated' :
+	                    status === 'broken' ? '✗ σ-broken' :
+	                    '… unchecked';
                 const statusColor =
                     status === 'fresh' ? 'var(--success)' :
                     status === 'relocated' ? 'var(--warning)' :
                     status === 'broken' ? 'var(--danger)' :
                     'var(--text-2)';
-                const lineInfo = (ctx.actual_line && ctx.actual_line != ctx.requested_line)
-                    ? (ctx.requested_line + '→' + ctx.actual_line)
-                    : String(ctx.actual_line || ctx.requested_line || line);
+	                const lineInfo = (ctx.actual_line && ctx.actual_line != ctx.requested_line)
+	                    ? (ctx.requested_line + '→' + ctx.actual_line)
+	                    : String(ctx.actual_line || ctx.requested_line || line);
 
-                const headerHtml = `
-                    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;">
-                        <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                            ${escHtml('📄 ' + doc + ':' + lineInfo)}
-                        </div>
-                        <div style="display:flex;gap:6px;flex-shrink:0;">
-                            <button type="button" data-open="vscode" style="background:rgba(255,255,255,0.03);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:4px 8px;font-size:11px;cursor:pointer;">VS Code</button>
-                            <button type="button" data-open="open" style="background:rgba(255,255,255,0.03);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:4px 8px;font-size:11px;cursor:pointer;">Open</button>
-                            <button type="button" data-open="reveal" style="background:rgba(255,255,255,0.03);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:4px 8px;font-size:11px;cursor:pointer;">Reveal</button>
-                        </div>
-                    </div>
-                    <div style="color:${statusColor};font-size:11px;margin-bottom:10px;">${escHtml(statusText)}</div>
-                `;
+                    const anchor = String(ctx.anchor_word || word || '').trim();
+                    const edgeInfo = (query && anchor && query !== anchor)
+                        ? ('Edge: ' + query + ' → ' + anchor)
+                        : '';
 
-                const bodyHtml = `<div style="white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;line-height:1.45;">${escHtml(String(ctx.content || ''))}</div>`;
-	            contextTooltip.innerHTML = headerHtml + bodyHtml;
-	            contextTooltip.style.display = 'block';
+                    function escapeRegExp(s) {
+                        // Standard JS escape for use inside RegExp
+                        // Note: double-escaped so the generated HTML contains `/[.*+?^${}()|[\\]\\\\]/g` correctly.
+                        return String(s).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
+                    }
+
+                    function highlightContent(text, needle) {
+                        const escaped = escHtml(String(text || ''));
+                        const n = String(needle || '').trim();
+                        if (!n) return escaped;
+                        try {
+                            const re = new RegExp(escapeRegExp(n), 'ig');
+                            return escaped.replace(re, (m) => '<span style="background:rgba(59,130,246,0.18);border:1px solid rgba(59,130,246,0.28);padding:0 2px;border-radius:4px;">' + m + '</span>');
+                        } catch (e) {
+                            return escaped;
+                        }
+                    }
+
+                    const bodyText = ctx.content
+                        ? String(ctx.content)
+                        : (ctx.error ? ('Error: ' + String(ctx.error)) : '');
+                    const searched = Array.isArray(ctx.searched) ? ctx.searched.slice(0, 6) : [];
+                    const searchedHtml = searched.length
+                        ? ('<div style=\"margin-top:10px;color:var(--text-3);font-size:11px;\">Tried:\\n' + escHtml(searched.join('\\n')) + '</div>')
+                        : '';
+
+	                const headerHtml = `
+	                    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;">
+	                        <div style="min-width:0;">
+                                <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                                    ${escHtml(anchor || word || 'σ-context')}
+                                </div>
+                                <div style="color:var(--text-3);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                                    ${escHtml('📄 ' + doc + ':' + lineInfo)}
+                                </div>
+	                        </div>
+	                        <div style="display:flex;gap:6px;flex-shrink:0;">
+	                            <button type="button" data-open="vscode" style="background:rgba(255,255,255,0.03);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:4px 8px;font-size:11px;cursor:pointer;">VS Code</button>
+	                            <button type="button" data-open="open" style="background:rgba(255,255,255,0.03);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:4px 8px;font-size:11px;cursor:pointer;">Open</button>
+	                            <button type="button" data-open="reveal" style="background:rgba(255,255,255,0.03);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:4px 8px;font-size:11px;cursor:pointer;">Reveal</button>
+	                        </div>
+	                    </div>
+	                    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:10px;">
+                            <div style="color:${statusColor};font-size:11px;">${escHtml(statusText)}</div>
+                            <div style="color:var(--text-3);font-size:11px;">${escHtml(edgeInfo)}</div>
+                        </div>
+	                `;
+
+	                const bodyHtml = `<div style="white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;line-height:1.45;">${highlightContent(bodyText, anchor || word)}</div>${searchedHtml}`;
+		            contextTooltip.innerHTML = headerHtml + bodyHtml;
+		            contextTooltip.style.display = 'block';
 
                 contextTooltip.querySelectorAll('button[data-open]').forEach(btn => {
                     btn.onclick = async (e) => {
@@ -1118,19 +1251,20 @@ HTML_PAGE = '''<!DOCTYPE html>
                 });
                 const data = await res.json();
                 
-	                if (data.error) {
-	                    content.innerHTML = '<div class="empty"><h3>Error</h3><p>' + escHtml(data.error) + '</p></div>';
-	                } else {
-	                    try { await loadDocs(); } catch (e) {}
-	                    setSelectedDoc(file.name);
-	                    content.innerHTML = `
-	                        <div class="empty">
-	                            <h3>✓ Document Added</h3>
-	                            <p>${data.anchors} concepts extracted, ${data.edges} connections created</p>
-	                            <p style="margin-top: 16px; color: var(--success);">Selected: ${escHtml(file.name)}</p>
-	                        </div>
-	                    `;
-	                }
+		                if (data.error) {
+		                    content.innerHTML = '<div class="empty"><h3>Error</h3><p>' + escHtml(data.error) + '</p></div>';
+		                } else {
+		                    try { await loadDocs(); } catch (e) {}
+                            const stored = String(data.filename || file.name || '').trim();
+		                    setSelectedDoc(stored);
+		                    content.innerHTML = `
+		                        <div class="empty">
+		                            <h3>✓ Document Added</h3>
+		                            <p>${data.anchors} concepts extracted, ${data.edges} connections created</p>
+		                            <p style="margin-top: 16px; color: var(--success);">Selected: ${escHtml(stored)}</p>
+		                        </div>
+		                    `;
+		                }
             } catch (err) {
                 content.innerHTML = '<div class="empty"><h3>Upload Error</h3><p>' + escHtml(err.message) + '</p></div>';
             }

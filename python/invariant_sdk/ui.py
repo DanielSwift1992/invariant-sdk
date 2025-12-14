@@ -50,6 +50,8 @@ class UIHandler(BaseHTTPRequestHandler):
     
     _degree_total_cache: Dict[str, int] = {}
     _degree_total_crystal_id: Optional[str] = None
+
+    _ANCHOR_SCAN_RADIUS = 50
     
     def log_message(self, format, *args):
         pass  # Suppress logging
@@ -1322,9 +1324,6 @@ class UIHandler(BaseHTTPRequestHandler):
         Returns:
             status: 'fresh' | 'relocated' | 'broken' | 'unchecked'
         """
-        import hashlib
-        import re
-        
         params = urllib.parse.parse_qs(query_string or "")
         doc = (params.get('doc', [''])[0] or '').strip()
         line_str = (params.get('line', [''])[0] or '').strip()
@@ -1364,44 +1363,12 @@ class UIHandler(BaseHTTPRequestHandler):
             # Tokenize entire file for hash computation
             tokens = self._tokenize_file(text)
             
-            # Default status
-            status = 'unchecked'
-            actual_line = target_line
-            
-            # If ctx_hash provided, verify integrity
-            if ctx_hash:
-                # Get all hashes for tokens on target line
-                line_hashes = self._compute_hash_at_line(tokens, target_line)
-                
-                if ctx_hash in line_hashes:
-                    status = 'fresh'
-                else:
-                    # Hash doesn't match - try to find it nearby (self-healing)
-                    scan_radius = 50
-                    found_line = None
-                    
-                    for offset in range(1, scan_radius + 1):
-                        # Check above
-                        check_line = target_line - offset
-                        if check_line >= 1:
-                            hashes = self._compute_hash_at_line(tokens, check_line)
-                            if ctx_hash in hashes:
-                                found_line = check_line
-                                break
-                        
-                        # Check below
-                        check_line = target_line + offset
-                        if check_line <= len(lines):
-                            hashes = self._compute_hash_at_line(tokens, check_line)
-                            if ctx_hash in hashes:
-                                found_line = check_line
-                                break
-                    
-                    if found_line:
-                        status = 'relocated'
-                        actual_line = found_line
-                    else:
-                        status = 'broken'
+            status, actual_line, anchor_word = self._resolve_anchor_coordinate(
+                lines=lines,
+                tokens=tokens,
+                requested_line=target_line,
+                ctx_hash=ctx_hash or None,
+            )
             
             # Extract semantic block from actual_line
             block_start, block_end, block_lines = self._extract_semantic_block(lines, actual_line)
@@ -1412,6 +1379,7 @@ class UIHandler(BaseHTTPRequestHandler):
                 'requested_line': target_line,
                 'actual_line': actual_line,
                 'status': status,
+                'anchor_word': anchor_word,
                 'block_start': block_start,
                 'block_end': block_end,
                 'content': '\n'.join(block_lines),
@@ -1422,12 +1390,83 @@ class UIHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_json({'error': str(e), 'status': 'broken'}, 500)
 
+    def _resolve_anchor_coordinate(
+        self,
+        *,
+        lines: list[str],
+        tokens: list[tuple[str, int]],
+        requested_line: int,
+        ctx_hash: Optional[str],
+    ) -> tuple[str, int, Optional[str]]:
+        """
+        Anchor Integrity Protocol (docs/INVARIANTS.md):
+        - fresh: ctx_hash matches at requested line
+        - relocated: ctx_hash found within scan radius
+        - broken: ctx_hash not found nearby
+        - unchecked: no ctx_hash provided
+        """
+        status = 'unchecked'
+        actual_line = requested_line
+        anchor_word: Optional[str] = None
+
+        if not ctx_hash:
+            return status, actual_line, anchor_word
+
+        for h, w in self._compute_hashes_at_line(tokens, requested_line):
+            if h == ctx_hash:
+                return 'fresh', requested_line, w
+
+        scan_radius = UIHandler._ANCHOR_SCAN_RADIUS
+        for offset in range(1, scan_radius + 1):
+            up = requested_line - offset
+            if up >= 1:
+                for h, w in self._compute_hashes_at_line(tokens, up):
+                    if h == ctx_hash:
+                        return 'relocated', up, w
+
+            down = requested_line + offset
+            if down <= len(lines):
+                for h, w in self._compute_hashes_at_line(tokens, down):
+                    if h == ctx_hash:
+                        return 'relocated', down, w
+
+        return 'broken', requested_line, None
+
+    def _project_root(self) -> Path:
+        """Determine project root from overlay location when possible (robust to running from subdirs)."""
+        overlay_path = UIHandler.overlay_path
+        if overlay_path:
+            try:
+                p = Path(overlay_path).resolve()
+                if p.parent.name == '.invariant':
+                    return p.parent.parent
+            except Exception:
+                pass
+        return Path('.').resolve()
+
     def _resolve_doc_path(self, doc: str) -> tuple[Optional[Path], list[Path]]:
-        """Resolve a document path within project roots (workspace, .invariant, docs)."""
-        project_root = Path('.').resolve()
+        """
+        Resolve a document path within project roots.
+
+        Theory: pointer-to-reality can drift (files move). We try exact resolution first (O(1)),
+        then a bounded search inside the project root (still deterministic; never guess ambiguously).
+        """
+        project_root = self._project_root()
         doc_rel = Path(doc)
         candidates: list[Path] = []
-        
+
+        # Cache (doc -> resolved path) to avoid repeated filesystem work.
+        cache: dict[str, str] = getattr(UIHandler, "_doc_path_cache", {}) or {}
+        cached = cache.get(doc)
+        if cached:
+            try:
+                p = Path(cached)
+                if p.exists() and p.is_file():
+                    return p, [p]
+            except Exception:
+                cache.pop(doc, None)
+                UIHandler._doc_path_cache = cache
+
         if doc_rel.is_absolute():
             try:
                 resolved = doc_rel.resolve()
@@ -1436,17 +1475,69 @@ class UIHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
         else:
-            for base in (project_root, project_root / '.invariant', project_root / 'docs'):
+            for base in (
+                project_root,
+                project_root / '.invariant',
+                project_root / 'docs',
+                project_root / 'data',
+                project_root / 'archive',
+            ):
                 try:
                     resolved = (base / doc_rel).resolve()
                 except Exception:
                     continue
                 if project_root in resolved.parents or resolved == project_root:
                     candidates.append(resolved)
-        
+
         for candidate in candidates:
             if candidate.exists() and candidate.is_file():
+                cache[doc] = str(candidate)
+                UIHandler._doc_path_cache = cache
                 return candidate, candidates
+
+        # Fallback: locate by suffix/name within project_root (path drift).
+        try:
+            target_suffix = doc_rel.as_posix()
+            basename = doc_rel.name
+            if basename:
+                found: list[tuple[str, Path]] = []
+                skip_dirs = {
+                    '.git', '.venv', 'node_modules', 'dist', 'build',
+                    '__pycache__', '.pytest_cache', '.mypy_cache',
+                }
+                for root, dirs, files in os.walk(project_root):
+                    dirs[:] = [d for d in dirs if d not in skip_dirs and not d.startswith('.')]
+                    if basename in files:
+                        p = Path(root) / basename
+                        if not p.is_file():
+                            continue
+                        try:
+                            rel = p.relative_to(project_root).as_posix()
+                        except Exception:
+                            rel = p.as_posix()
+                        found.append((rel, p))
+                        if len(found) >= 30:
+                            break
+
+                if found:
+                    suffix_matches = [p for (rel, p) in found if rel.endswith(target_suffix)]
+                    if len(suffix_matches) == 1:
+                        cache[doc] = str(suffix_matches[0])
+                        UIHandler._doc_path_cache = cache
+                        candidates.extend([p for (_rel, p) in found[:10]])
+                        return suffix_matches[0], candidates
+
+                    if len(found) == 1:
+                        cache[doc] = str(found[0][1])
+                        UIHandler._doc_path_cache = cache
+                        candidates.append(found[0][1])
+                        return found[0][1], candidates
+
+                    # Ambiguous: include a few matches for debugging, but don't guess.
+                    candidates.extend([p for (_rel, p) in found[:10]])
+        except Exception:
+            pass
+
         return None, candidates
 
     def api_open(self, query_string: str):
@@ -1494,29 +1585,12 @@ class UIHandler(BaseHTTPRequestHandler):
             text = doc_path.read_text(encoding='utf-8')
             lines = text.split('\n')
             tokens = self._tokenize_file(text)
-            if ctx_hash:
-                line_hashes = self._compute_hash_at_line(tokens, target_line)
-                if ctx_hash in line_hashes:
-                    status = 'fresh'
-                else:
-                    scan_radius = 50
-                    found_line = None
-                    for offset in range(1, scan_radius + 1):
-                        up = target_line - offset
-                        if up >= 1:
-                            if ctx_hash in self._compute_hash_at_line(tokens, up):
-                                found_line = up
-                                break
-                        down = target_line + offset
-                        if down <= len(lines):
-                            if ctx_hash in self._compute_hash_at_line(tokens, down):
-                                found_line = down
-                                break
-                    if found_line:
-                        status = 'relocated'
-                        actual_line = found_line
-                    else:
-                        status = 'broken'
+            status, actual_line, _anchor_word = self._resolve_anchor_coordinate(
+                lines=lines,
+                tokens=tokens,
+                requested_line=target_line,
+                ctx_hash=ctx_hash or None,
+            )
         except Exception:
             status = 'broken'
             actual_line = target_line
@@ -1562,11 +1636,11 @@ class UIHandler(BaseHTTPRequestHandler):
         
         return results
     
-    def _compute_hash_at_line(self, tokens: list, target_line: int, k: int = 2) -> list:
+    def _compute_hashes_at_line(self, tokens: list, target_line: int, k: int = 2) -> list[tuple[str, str]]:
         """
         Compute all possible ctx_hashes for tokens at given line.
         
-        Returns list of hashes (one per token on that line).
+        Returns list of (ctx_hash, anchor_word) (one per token on that line).
         This is needed because we don't know which token was the anchor.
         """
         import hashlib
@@ -1577,8 +1651,8 @@ class UIHandler(BaseHTTPRequestHandler):
         if not line_tokens:
             return []
         
-        hashes = []
-        for anchor_idx, _ in line_tokens:
+        out: list[tuple[str, str]] = []
+        for anchor_idx, token in line_tokens:
             # Get window
             start = max(0, anchor_idx - k)
             end = min(len(tokens), anchor_idx + k + 1)
@@ -1587,9 +1661,9 @@ class UIHandler(BaseHTTPRequestHandler):
             normalized = ' '.join(w.lower() for w in window_words)
             
             h = hashlib.sha256(normalized.encode('utf-8')).hexdigest()[:8]
-            hashes.append(h)
+            out.append((h, token[0]))
         
-        return hashes
+        return out
     
     def _extract_semantic_block(self, lines: list, target_line: int, max_lines: int = 10):
         """
