@@ -173,12 +173,19 @@ def locate(issue_text: str, max_results: int = 0) -> str:
     """
     Find relevant files from an issue, error, or task description.
     
-    USE INSTEAD OF: grep, ripgrep, file search
+    USE INSTEAD OF: grep -rn, rg (repo-wide searches)
     ADVANTAGE: Returns ONE ranked list with interference scoring (2^n)
+    
+    RECOMMENDED WORKFLOW:
+        1. locate("error message or keywords") → get ranked files
+        2. IF need exact line numbers: scoped_grep("pattern", "file1,file2")
+        3. read_block(doc, line) → view the actual code
     
     Example:
         locate("TypeError in user authentication module")
         → Returns ranked files: auth.py (score=16), user.py (score=8)
+        
+    For exact pattern matching, use scoped_grep() on results.
     
     How scoring works:
         score = 2^n where n = number of matching concepts
@@ -193,7 +200,12 @@ def locate(issue_text: str, max_results: int = 0) -> str:
                      Default: all files with score > 1
     
     Returns:
-        JSON with ranked files, matching concepts, and candidate line numbers
+        JSON with ranked files including:
+        - candidate_lines: specific line numbers where matches occur
+        - first_match: {line, preview} for top 5 files (immediate context!)
+        
+        The preview shows 2 lines starting at first match - often enough to
+        confirm this is the right file WITHOUT needing scoped_grep().
     """
     _ensure_initialized()
     
@@ -273,18 +285,49 @@ def locate(issue_text: str, max_results: int = 0) -> str:
     # Filter: only files with score > 1 (at least 1 matching seed)
     # max_results=0 means return all matching files
     results = []
+    preview_count = 0  # Only read files for top N previews (MDL: minimize reads)
+    MAX_PREVIEWS = 5
+    
     for doc, info in ranked:
         if info["score"] <= 1:
             continue  # No real match
         if max_results > 0 and len(results) >= max_results:
             break
-        results.append({
+        
+        result_entry = {
             "file": doc,
             "score": info["score"],
             "matching_words": info["words"],
             "n_matches": len(info["words"]),
             "candidate_lines": info["lines"],
-        })
+        }
+        
+        # Add mini-preview for top N files (Bisection Law: more bits per call)
+        # Theory: coordinates + preview = actionable immediately, no need for scoped_grep
+        if preview_count < MAX_PREVIEWS and info["lines"]:
+            path = _find_doc_path(doc)
+            if path:
+                try:
+                    text = path.read_text(encoding='utf-8')
+                    lines = text.split('\n')
+                    first_line = info["lines"][0]
+                    if 1 <= first_line <= len(lines):
+                        # Get line + 1 context line after (minimal, per MDL)
+                        preview_lines = []
+                        idx = first_line - 1
+                        preview_lines.append(f"{first_line}: {lines[idx].rstrip()[:100]}")
+                        if idx + 1 < len(lines):
+                            preview_lines.append(f"{first_line+1}: {lines[idx+1].rstrip()[:100]}")
+                        
+                        result_entry["first_match"] = {
+                            "line": first_line,
+                            "preview": "\n".join(preview_lines)
+                        }
+                        preview_count += 1
+                except Exception:
+                    pass  # Skip preview on error
+        
+        results.append(result_entry)
     
     return json.dumps({
         "query_words": unique_words,
@@ -757,6 +800,116 @@ def context(doc: str, line: int, ctx_hash: Optional[str] = None) -> str:
         
     except Exception as e:
         return json.dumps({"error": str(e), "status": "broken"})
+
+
+@mcp.tool()
+def scoped_grep(pattern: str, files: str, max_matches: int = 20) -> str:
+    """
+    Search for EXACT pattern in specific files. Returns line numbers + context.
+    
+    **USE INSTEAD OF:** grep -rn, rg (repo-wide searches)
+    **USE AFTER:** locate() to get file list, then grep ONLY those files
+    
+    Theory: Scoped search (file-specific) has higher info-gain than repo-wide.
+    This tool limits output to avoid token waste.
+    
+    Args:
+        pattern: Exact string or regex pattern to search
+        files: Comma-separated file paths (from locate results)
+               Example: "pkg/utils.py,tests/test_utils.py"
+        max_matches: Maximum matches to return (default 20, max 50)
+    
+    Returns:
+        JSON with matches: [{file, line, content, context_before, context_after}]
+    
+    Example workflow:
+        1. locate("ASCIIValidator test") → finds validators.py, test_validators.py
+        2. scoped_grep("ASCIIUsernameValidator", "validators.py,test_validators.py")
+           → exact line numbers where pattern appears
+    """
+    import re
+    
+    _ensure_initialized()
+    
+    # Parse files
+    file_list = [f.strip() for f in files.split(",") if f.strip()]
+    if not file_list:
+        return json.dumps({"error": "No files specified"})
+    
+    # Limit max_matches
+    max_matches = min(max(1, max_matches), 50)
+    
+    matches = []
+    files_searched = 0
+    files_with_matches = 0
+    
+    for file_path in file_list:
+        # Resolve path
+        path = _find_doc_path(file_path)
+        if not path:
+            continue
+        
+        try:
+            text = path.read_text(encoding='utf-8')
+        except Exception:
+            continue
+        
+        files_searched += 1
+        lines = text.split('\n')
+        file_has_match = False
+        
+        for line_num, line_content in enumerate(lines, 1):
+            try:
+                if re.search(pattern, line_content):
+                    file_has_match = True
+                    
+                    # Get context (1 line before/after)
+                    context_before = lines[line_num - 2] if line_num > 1 else ""
+                    context_after = lines[line_num] if line_num < len(lines) else ""
+                    
+                    matches.append({
+                        "file": file_path,
+                        "line": line_num,
+                        "content": line_content.strip(),
+                        "context_before": context_before.strip()[:100],
+                        "context_after": context_after.strip()[:100],
+                    })
+                    
+                    if len(matches) >= max_matches:
+                        break
+            except re.error:
+                # Invalid regex, try literal search
+                if pattern in line_content:
+                    file_has_match = True
+                    context_before = lines[line_num - 2] if line_num > 1 else ""
+                    context_after = lines[line_num] if line_num < len(lines) else ""
+                    
+                    matches.append({
+                        "file": file_path,
+                        "line": line_num,
+                        "content": line_content.strip(),
+                        "context_before": context_before.strip()[:100],
+                        "context_after": context_after.strip()[:100],
+                    })
+                    
+                    if len(matches) >= max_matches:
+                        break
+        
+        if file_has_match:
+            files_with_matches += 1
+        
+        if len(matches) >= max_matches:
+            break
+    
+    return json.dumps({
+        "pattern": pattern,
+        "files_searched": files_searched,
+        "files_with_matches": files_with_matches,
+        "total_matches": len(matches),
+        "truncated": len(matches) >= max_matches,
+        "matches": matches,
+    }, indent=2)
+
 
 
 @mcp.tool()
