@@ -22,11 +22,15 @@ try:
     from .halo import hash8_hex
     from .overlay import OverlayGraph, find_overlays
     from .physics import HaloPhysics
+    from .tokenize import tokenize_simple as _tokenize_simple
+    from .tokenize import tokenize_with_positions as _tokenize_with_positions
 except ImportError:
     # Running as standalone script
     from invariant_sdk.halo import hash8_hex
     from invariant_sdk.overlay import OverlayGraph, find_overlays
     from invariant_sdk.physics import HaloPhysics
+    from invariant_sdk.tokenize import tokenize_simple as _tokenize_simple
+    from invariant_sdk.tokenize import tokenize_with_positions as _tokenize_with_positions
 
 
 # Default server
@@ -39,8 +43,7 @@ def tokenize_simple(text: str) -> List[str]:
     
     Uses word boundaries, filters short words.
     """
-    words = re.findall(r'\b[a-zA-Z]{3,}\b', text.lower())
-    return words
+    return _tokenize_simple(text)
 
 
 def tokenize_with_positions(text: str) -> List[tuple]:
@@ -51,19 +54,7 @@ def tokenize_with_positions(text: str) -> List[tuple]:
     
     Theory: Store coordinates, not content (MDL/Invariant III).
     """
-    results = []
-    lines = text.split('\n')
-    char_offset = 0
-    
-    for line_num, line in enumerate(lines, 1):
-        for match in re.finditer(r'\b[a-zA-Z]{3,}\b', line):
-            word = match.group().lower()
-            char_start = char_offset + match.start()
-            char_end = char_offset + match.end()
-            results.append((word, line_num, char_start, char_end))
-        char_offset += len(line) + 1  # +1 for newline
-    
-    return results
+    return _tokenize_with_positions(text)
 
 
 def compute_ctx_hash(tokens_with_pos: List[tuple], anchor_idx: int, k: int = 2) -> str:
@@ -205,6 +196,21 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 files_after_gitignore = all_files
         else:
             files_after_gitignore = all_files
+
+        # Always ignore protocol / build artifacts (prevents self-indexing .invariant, etc.)
+        def is_default_ignored(p: Path) -> bool:
+            try:
+                rel = p.relative_to(input_path)
+            except Exception:
+                rel = p
+            for part in rel.parts:
+                if part in {".git", ".invariant", "__pycache__", ".venv", "venv", "node_modules", "dist", "build"}:
+                    return True
+                if part.endswith(".egg-info"):
+                    return True
+            return False
+
+        files_after_gitignore = [f for f in files_after_gitignore if not is_default_ignored(f)]
         
         # Filter to text files only
         files = [f for f in files_after_gitignore if is_text_file(f)]
@@ -219,107 +225,137 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     else:
         overlay = OverlayGraph()
     total_edges = 0
-    
-    for file_path in files:
-        print(f"Processing: {file_path.name}")
-        
+    mean_mass = client.mean_mass
+
+    # ------------------------------------------------------------------
+    # Pass 1/2: scan files and collect unique words (bounded per file)
+    # ------------------------------------------------------------------
+    print("Pass 1/2: scanning files for vocabulary...")
+    per_file_words: dict[Path, list[str]] = {}
+    all_words: Set[str] = set()
+
+    for i, file_path in enumerate(files, 1):
+        if i == 1 or i % 50 == 0 or i == len(files):
+            print(f"  [{i}/{len(files)}] {file_path}")
+
         try:
-            text = file_path.read_text(encoding='utf-8')
-        except Exception as e:
-            print(f"  Error reading: {e}")
-            continue
-        
-        # Tokenize WITH positions for provenance tracking (Invariant III: MDL)
-        tokens_with_pos = tokenize_with_positions(text)
-        
-        if len(tokens_with_pos) < 2:
-            print(f"  Skipping (too few tokens)")
-            continue
-        
-        # Get phase classification for all unique words
-        words = [w for w, _, _, _ in tokens_with_pos]
-        unique_words = list(dict.fromkeys(words))[:200]  # Limit for batch query
-        
-        # Classify words as solid/gas using BATCH API for speed
-        word_phases = {}  # word -> 'solid' | 'gas'
-        mean_mass = client.mean_mass
-        
-        # Batch lookup (much faster than individual calls)
-        word_to_hash = {w: hash8_hex(f"Ġ{w}") for w in unique_words}
-        try:
-            batch_results = client._client.get_halo_pages(word_to_hash.values(), limit=0)
-            for word, h8 in word_to_hash.items():
-                result = batch_results.get(h8) or {}
-                if result.get('exists'):
-                    meta = result.get('meta') or {}
-                    degree = int(meta.get('degree_total') or 1)
-                    mass = 1.0 / math.log(2 + degree) if degree > 0 else 0.5
-                    word_phases[word] = "solid" if mass >= mean_mass else "gas"
-                else:
-                    # THEORY FIX: Unknown = Local Anchor (max information)
-                    # Words not in LLM vocabulary are RARE/SPECIFIC to this project
-                    # Names, variables, local terms = highest value anchors
-                    word_phases[word] = "solid"  # Local Anchor!
+            text = file_path.read_text(encoding="utf-8")
         except Exception:
-            # Fallback: treat all as solid (local anchors)
-            for word in unique_words:
+            continue
+
+        tokens_with_pos = tokenize_with_positions(text)
+        if len(tokens_with_pos) < 2:
+            continue
+
+        words = [w for w, _, _, _ in tokens_with_pos]
+        unique_words = list(dict.fromkeys(words))[:200]  # keep existing bound
+        if not unique_words:
+            continue
+
+        per_file_words[file_path] = unique_words
+        all_words.update(unique_words)
+
+    print(f"  Files with tokens: {len(per_file_words)}/{len(files)}")
+    print(f"  Unique words (bounded): {len(all_words)}")
+    print()
+
+    # ------------------------------------------------------------------
+    # Mega-batch crystal meta for ALL words (chunked to avoid huge payloads)
+    # ------------------------------------------------------------------
+    print("Fetching crystal meta (mega-batch)...")
+    word_to_hash = {w: hash8_hex(f"Ġ{w}") for w in all_words}
+    hashes = list(word_to_hash.values())
+
+    # Empirically safe chunk to avoid request-size limits.
+    chunk_size = 4000
+    batch_results: dict[str, dict] = {}
+    http_requests = 0
+
+    for start in range(0, len(hashes), chunk_size):
+        http_requests += 1
+        chunk = hashes[start : start + chunk_size]
+        try:
+            resp = client._client.get_halo_pages(chunk, limit=0)
+        except Exception as e:
+            print(f"  Error: crystal server batch failed: {e}")
+            return 1
+        batch_results.update(resp)
+
+        done = min(start + chunk_size, len(hashes))
+        if http_requests == 1 or done == len(hashes) or http_requests % 5 == 0:
+            print(f"  Crystal batches: {http_requests}  ({done}/{len(hashes)} words)")
+
+    print(f"  HTTP requests: {http_requests}")
+    print()
+
+    # ------------------------------------------------------------------
+    # Pass 2/2: build edges using cached crystal meta (no per-file HTTP)
+    # ------------------------------------------------------------------
+    print("Pass 2/2: building overlay...")
+    for i, (file_path, unique_words) in enumerate(per_file_words.items(), 1):
+        if i == 1 or i % 50 == 0 or i == len(per_file_words):
+            print(f"  [{i}/{len(per_file_words)}] {file_path}")
+
+        try:
+            text = file_path.read_text(encoding="utf-8")
+        except Exception:
+            continue
+
+        tokens_with_pos = tokenize_with_positions(text)
+        if len(tokens_with_pos) < 2:
+            continue
+
+        # Phase classification: word -> 'solid' | 'gas'
+        word_phases: dict[str, str] = {}
+        for word in unique_words:
+            h8 = word_to_hash.get(word)
+            res = batch_results.get(h8) if h8 else None
+            res = res or {}
+            if res.get("exists"):
+                meta = res.get("meta") or {}
+                degree = int(meta.get("degree_total") or 1)
+                mass = 1.0 / math.log(2 + degree) if degree > 0 else 0.5
+                word_phases[word] = "solid" if mass >= mean_mass else "gas"
+            else:
+                # THEORY: Unknown = Local Anchor (rare, high information)
                 word_phases[word] = "solid"
-        
-        solid_count = sum(1 for p in word_phases.values() if p == "solid")
-        gas_count = len(word_phases) - solid_count
-        print(f"  Words: {len(words)}, Solid: {solid_count}, Gas: {gas_count}")
-        
-        # No minimum solid check - all documents have value
-        
+
         # Create edges between consecutive tokens
-        # Logic (INVARIANTS.md Hierarchy Law):
-        #   solid→solid = σ-edge (document fact, provable)
-        #   solid→gas = σ-edge (document fact with noise context)
-        #   gas→solid = σ-edge (noise leading to anchor)
-        #   gas→gas = skip (pure noise, no information)
-        
         doc_name = str(file_path.relative_to(input_path) if input_path.is_dir() else file_path.name)
         doc_edges = 0
-        
-        for i in range(len(tokens_with_pos) - 1):
-            src_word, src_line, _, _ = tokens_with_pos[i]
-            tgt_word, tgt_line, _, _ = tokens_with_pos[i + 1]
-            
+
+        for j in range(len(tokens_with_pos) - 1):
+            src_word, _src_line, _, _ = tokens_with_pos[j]
+            tgt_word, tgt_line, _, _ = tokens_with_pos[j + 1]
+
             src_phase = word_phases.get(src_word, "gas")
             tgt_phase = word_phases.get(tgt_word, "gas")
-            
+
             # Skip gas→gas (pure noise)
             if src_phase == "gas" and tgt_phase == "gas":
                 continue
-            
+
             src_hash = hash8_hex(f"Ġ{src_word}")
             tgt_hash = hash8_hex(f"Ġ{tgt_word}")
-            
+
             # ALL document edges are σ (provable facts with doc:line provenance)
-            # gas→gas is already skipped above — remaining edges are observations
-            ring = "sigma"
-            
-            # Compute ctx_hash for target
-            ctx_hash = compute_ctx_hash(tokens_with_pos, i + 1, k=2)
-            
+            ctx_hash = compute_ctx_hash(tokens_with_pos, j + 1, k=2)
             overlay.add_edge(
-                src_hash, tgt_hash, 
-                weight=1.0, 
+                src_hash,
+                tgt_hash,
+                weight=1.0,
                 doc=doc_name,
-                ring=ring,
+                ring="sigma",
                 phase=tgt_phase,
                 line=tgt_line,
-                ctx_hash=ctx_hash
+                ctx_hash=ctx_hash,
             )
             overlay.define_label(src_hash, src_word)
             overlay.define_label(tgt_hash, tgt_word)
             doc_edges += 1
             total_edges += 1
-        
-        sigma_edges = sum(1 for src, edges in overlay.edges.items() 
-                         for e in edges if e.ring == "sigma" and e.doc == doc_name)
-        lambda_edges = doc_edges - sigma_edges
-        print(f"  Added {doc_edges} edges (σ: {sigma_edges}, λ: {lambda_edges})")
+
+        print(f"    Added {doc_edges} edges")
     
     # Save overlay
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -685,4 +721,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     sys.exit(main())
-

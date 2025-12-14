@@ -1031,11 +1031,8 @@ class UIHandler(BaseHTTPRequestHandler):
                 return
             
             # Tokenize with line positions (Anchor Integrity Protocol needs stable coordinates).
-            tokens: list[tuple[str, int]] = []
-            lines = text.split('\n')
-            for line_num, line in enumerate(lines, 1):
-                for match in re.finditer(r'\b[a-zA-Z]{3,}\b', line):
-                    tokens.append((match.group().lower(), line_num))
+            from invariant_sdk.tokenize import tokenize_with_lines
+            tokens = tokenize_with_lines(text)
             
             words = [w for (w, _ln) in tokens]
             unique_words = list(dict.fromkeys(words))[:500]  # limit network + processing
@@ -1205,11 +1202,8 @@ class UIHandler(BaseHTTPRequestHandler):
                     del overlay.edges[src]
             
             # Tokenize with line positions
-            tokens: list[tuple[str, int]] = []
-            lines = text.split('\n')
-            for line_num, line in enumerate(lines, 1):
-                for match in re.finditer(r'\b[a-zA-Z]{3,}\b', line):
-                    tokens.append((match.group().lower(), line_num))
+            from invariant_sdk.tokenize import tokenize_with_lines
+            tokens = tokenize_with_lines(text)
             
             words = [w for (w, _ln) in tokens]
             unique_words = list(dict.fromkeys(words))[:500]
@@ -1802,16 +1796,8 @@ class UIHandler(BaseHTTPRequestHandler):
     
     def _tokenize_file(self, text: str) -> list:
         """Tokenize text with position info for hash computation."""
-        import re
-        results = []
-        lines = text.split('\n')
-        
-        for line_num, line in enumerate(lines, 1):
-            for match in re.finditer(r'\b[a-zA-Z]{3,}\b', line):
-                word = match.group().lower()
-                results.append((word, line_num))
-        
-        return results
+        from invariant_sdk.tokenize import tokenize_with_lines
+        return tokenize_with_lines(text)
     
     def _compute_hashes_at_line(self, tokens: list, target_line: int, k: int = 2) -> list[tuple[str, str]]:
         """

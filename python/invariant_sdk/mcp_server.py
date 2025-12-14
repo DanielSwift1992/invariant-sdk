@@ -38,15 +38,36 @@ import json
 from pathlib import Path
 from typing import Optional
 
-from mcp.server.fastmcp import FastMCP
+try:
+    from mcp.server.fastmcp import FastMCP  # type: ignore
+except Exception:  # pragma: no cover
+    FastMCP = None
 
-# Initialize MCP server
-mcp = FastMCP("invariant")
+
+class _NoMCP:
+    """Fallback so SDK functions can be imported without the `mcp` package."""
+
+    def tool(self):  # noqa: D401
+        def decorator(fn):
+            return fn
+
+        return decorator
+
+    def run(self, *args, **kwargs):
+        raise RuntimeError(
+            "MCP server runtime requires the `mcp` Python package, but it is not installed. "
+            "Install it in your environment and retry."
+        )
+
+
+# Initialize MCP server (or a no-op wrapper for direct imports)
+mcp = FastMCP("invariant") if FastMCP else _NoMCP()
 
 # Globals (initialized on first use)
 _physics = None
 _overlay = None
 _overlay_path = None
+_halo_meta_cache: dict[str, dict] = {}
 
 
 def _ensure_initialized():
@@ -77,6 +98,32 @@ def _ensure_initialized():
     if _overlay is None:
         _overlay = OverlayGraph()
         _overlay_path = Path("./.invariant/overlay.jsonl")
+
+
+def _get_halo_meta_cached(hashes, *, chunk_size: int = 4000) -> tuple[dict[str, dict], int]:
+    """
+    Meta-only Halo lookup with in-process cache + chunking.
+
+    Returns:
+      (results_by_hash8, http_requests_made)
+    """
+    _ensure_initialized()
+    if not _physics:
+        return {}, 0
+
+    global _halo_meta_cache
+
+    hashes_list = [str(h).lower() for h in hashes]
+    missing = [h for h in hashes_list if h and h not in _halo_meta_cache]
+
+    http_requests = 0
+    for start in range(0, len(missing), int(chunk_size)):
+        http_requests += 1
+        chunk = missing[start : start + int(chunk_size)]
+        resp = _physics._client.get_halo_pages(chunk, limit=0) or {}
+        _halo_meta_cache.update(resp)
+
+    return {h: (_halo_meta_cache.get(h) or {}) for h in hashes_list}, http_requests
 
 
 # ============================================================================
@@ -110,7 +157,13 @@ def status() -> str:
         "overlay_path": str(_overlay_path) if _overlay_path else None,
         "overlay_edges": _overlay.n_edges if _overlay else 0,
         "overlay_labels": len(_overlay.labels) if _overlay else 0,
-        "overlay_docs": len(_overlay.sources) if _overlay else 0,
+        # NOTE: `OverlayGraph.sources` tracks overlay FILES, not indexed documents.
+        # For progress/debugging we want unique provenance docs inside edges.
+        "overlay_docs": (
+            len({e.doc for edges in _overlay.edges.values() for e in edges if e.doc})
+            if _overlay
+            else 0
+        ),
     }
     return json.dumps(info, indent=2)
 
@@ -144,25 +197,16 @@ def locate(issue_text: str, max_results: int = 0) -> str:
     """
     _ensure_initialized()
     
-    import re
     import math
     from invariant_sdk.cli import hash8_hex
+    from invariant_sdk.tokenize import dedupe_preserve_order, tokenize_simple
     
     # Extract ALL words from issue text (universal tokenization)
     # Let the crystal classify them by mass (solid vs gas)
     # NO heuristics: no stopwords, no programming-specific patterns
     
-    words = []
-    for m in re.finditer(r'\b[a-zA-Z]{3,}\b', issue_text):
-        words.append(m.group().lower())
-    
-    # Deduplicate, keep order
-    seen = set()
-    unique_words = []
-    for w in words:
-        if w not in seen:
-            seen.add(w)
-            unique_words.append(w)
+    # Extract deterministic surface tokens (supports snake_case identifiers).
+    unique_words = dedupe_preserve_order(tokenize_simple(issue_text))
     
     if not unique_words:
         return json.dumps({"error": "No words found in issue_text"})
@@ -178,7 +222,7 @@ def locate(issue_text: str, max_results: int = 0) -> str:
     unknown_words = []
     
     try:
-        batch_results = _physics._client.get_halo_pages(word_hashes.values(), limit=0)
+        batch_results, _http = _get_halo_meta_cached(word_hashes.values(), chunk_size=4000)
         for word, h8 in word_hashes.items():
             result = batch_results.get(h8) or {}
             if result.get('exists'):
@@ -326,7 +370,7 @@ def semantic_map(file_path: str) -> str:
         if hash_to_label:
             try:
                 import math
-                batch_results = _physics._client.get_halo_pages(hash_to_label.keys(), limit=0)
+                batch_results, _http = _get_halo_meta_cached(hash_to_label.keys(), chunk_size=4000)
                 for h8, label in hash_to_label.items():
                     res = batch_results.get(h8) or {}
                     if res.get('exists'):
@@ -641,8 +685,7 @@ def context(doc: str, line: int, ctx_hash: Optional[str] = None) -> str:
         JSON with content, status (fresh/relocated/broken/unchecked), actual_line
     """
     _ensure_initialized()
-    import hashlib
-    import re
+    from invariant_sdk.tokenize import tokenize_with_lines
     
     path = _find_doc_path(doc)
     if not path:
@@ -656,10 +699,7 @@ def context(doc: str, line: int, ctx_hash: Optional[str] = None) -> str:
             return json.dumps({"error": f"Line {line} out of range", "status": "broken"})
         
         # Tokenize for hash verification
-        tokens = []
-        for line_num, line_text in enumerate(lines, 1):
-            for match in re.finditer(r'\b[a-zA-Z]{3,}\b', line_text):
-                tokens.append((match.group().lower(), line_num))
+        tokens = tokenize_with_lines(text)
         
         status = "unchecked"
         actual_line = line
@@ -741,8 +781,9 @@ def ingest(file_path: str) -> str:
     """
     _ensure_initialized()
     import hashlib
-    import re
     import math
+    import time
+    from invariant_sdk.tokenize import tokenize_with_lines
     
     from invariant_sdk.cli import hash8_hex
     
@@ -784,30 +825,52 @@ def ingest(file_path: str) -> str:
                 files_after_gitignore = all_files
         else:
             files_after_gitignore = all_files
+
+        # Always ignore protocol / build artifacts (prevents self-indexing .invariant, etc.)
+        def is_default_ignored(p: Path) -> bool:
+            try:
+                rel = p.relative_to(path)
+            except Exception:
+                rel = p
+            for part in rel.parts:
+                if part in {".git", ".invariant", "__pycache__", ".venv", "venv", "node_modules", "dist", "build"}:
+                    return True
+                if part.endswith(".egg-info"):
+                    return True
+            return False
+
+        files_after_gitignore = [f for f in files_after_gitignore if not is_default_ignored(f)]
         
         # Filter to text files only (UTF-8 decodable)
         files = [f for f in files_after_gitignore if is_text_file(f)]
         
         if not files:
             return json.dumps({"error": f"No text files found in {file_path}"})
+
+    t0 = time.perf_counter()
+    try:
+        print(f"[invariant] ingest: scanning {len(files)} files", flush=True)
+    except Exception:
+        pass
     
     # OPTIMIZATION: Mega-batch all words from all files (Theory: MDL - 1 request < N requests)
     # Step 1: Collect all unique words from ALL files first
     all_words_set = set()
     file_words_map = {}  # file_path -> list of unique words
     
-    for file_path_obj in files:
+    for scanned_i, file_path_obj in enumerate(files, 1):
+        if scanned_i == 1 or (scanned_i % 100 == 0) or scanned_i == len(files):
+            try:
+                print(f"[invariant] ingest: scanned {scanned_i}/{len(files)}", flush=True)
+            except Exception:
+                pass
         try:
             text = file_path_obj.read_text(encoding='utf-8')
         except Exception:
             continue
         
         # Tokenize
-        tokens = []
-        lines = text.split('\n')
-        for line_num, line_text in enumerate(lines, 1):
-            for match in re.finditer(r'\b[a-zA-Z]{3,}\b', line_text):
-                tokens.append((match.group().lower(), line_num))
+        tokens = tokenize_with_lines(text)
         
         if len(tokens) < 2:
             continue
@@ -820,19 +883,34 @@ def ingest(file_path: str) -> str:
         
         file_words_map[file_path_obj] = (tokens, unique_words)
         all_words_set.update(unique_words)
-    
+
     if not all_words_set:
         return json.dumps({"error": "No words found in any files"})
+
+    t_scan = time.perf_counter()
+    try:
+        print(
+            f"[invariant] ingest: vocabulary {len(all_words_set)} words from {len(file_words_map)} files",
+            flush=True,
+        )
+    except Exception:
+        pass
     
     # Step 2: ONE mega-batch request for ALL words
     all_words_list = list(all_words_set)
     word_to_hash = {w: hash8_hex(f"Ġ{w}") for w in all_words_list}
     
     try:
-        # SINGLE HTTP REQUEST for all words from all files
-        batch_results = _physics._client.get_halo_pages(word_to_hash.values(), limit=0)
+        # Mega-batch meta lookup (chunked + cached)
+        batch_results, http_requests = _get_halo_meta_cached(word_to_hash.values(), chunk_size=4000)
     except Exception as e:
         return json.dumps({"error": f"Crystal server error: {e}"})
+
+    t_meta = time.perf_counter()
+    try:
+        print(f"[invariant] ingest: crystal meta ok ({http_requests} HTTP)", flush=True)
+    except Exception:
+        pass
     
     mean_mass = _physics.mean_mass
     
@@ -916,6 +994,12 @@ def ingest(file_path: str) -> str:
         total_edges += edges_added
         total_anchors_found += len(anchor_words)
         files_processed += 1
+
+        if files_processed == 1 or (files_processed % 100 == 0) or files_processed == total_files:
+            try:
+                print(f"[invariant] ingest: indexed {files_processed}/{total_files}", flush=True)
+            except Exception:
+                pass
         
         # Track first 10 files for progress visibility
         if len(files_details) < 10:
@@ -929,6 +1013,8 @@ def ingest(file_path: str) -> str:
     # Save overlay
     _overlay_path.parent.mkdir(parents=True, exist_ok=True)
     _overlay.save(_overlay_path)
+
+    t_save = time.perf_counter()
     
     return json.dumps({
         "success": True,
@@ -938,9 +1024,15 @@ def ingest(file_path: str) -> str:
         "total_edges": total_edges,
         "total_anchors": total_anchors_found,
         "unique_words_processed": len(all_words_set),
-        "http_requests": 1,  # Mega-batch optimization
+        "http_requests": http_requests,  # Mega-batch optimization (chunked)
         "files_sample": files_details,  # First 10 files
         "overlay_path": str(_overlay_path),
+        "timing_s": {
+            "scan": round(t_scan - t0, 3),
+            "crystal_meta": round(t_meta - t_scan, 3),
+            "index": round(t_save - t_meta, 3),
+            "total": round(t_save - t0, 3),
+        },
     }, indent=2)
 
 
