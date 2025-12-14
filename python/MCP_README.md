@@ -8,29 +8,33 @@
 
 ```bash
 pip install invariant-sdk
-# or from source:
-cd invariant-sdk/python && pip install -e .
 ```
 
-### 2. Configure Cursor / Claude Desktop
+### 2. Configure ANY MCP Client
 
-Add to your MCP config (`~/.cursor/mcp.json` or Claude Desktop settings):
+Works with: **Cursor, Claude Desktop, Windsurf, Cline, any MCP client.**
+
+Generic MCP config:
 
 ```json
 {
   "mcpServers": {
     "invariant": {
-      "command": "python",
-      "args": ["-m", "invariant_sdk.mcp_server"],
+      "command": "invariant-mcp",
       "cwd": "/path/to/your/project"
     }
   }
 }
 ```
 
-**Important:** Set `cwd` to your project root where `.invariant/` lives.
+**That's it.** One command, all clients.
 
 ### 3. Index Your Project
+
+```bash
+cd /path/to/your/project
+inv ingest ./src
+```
 
 From your project directory:
 
