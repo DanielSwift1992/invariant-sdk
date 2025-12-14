@@ -1,29 +1,35 @@
 """
-Invariant MCP Server — Semantic Kernel for LLM Agents
+Invariant MCP Server — Semantic Search for LLM Agents
 
-This is the MCP (Model Context Protocol) interface to the Invariant SDK.
-It exposes semantic tools that let LLMs understand code/documents without
-reading every file — they get the "semantic skeleton" instead.
+WHAT THIS DOES:
+Instead of reading every file to find relevant code, use these tools to:
+1. FIND files matching your task (locate) — 14ms vs minutes of grep
+2. UNDERSTAND file structure without reading content (semantic_map)
+3. VERIFY connections exist before claiming them (prove_path)
 
-Usage:
-    python -m invariant_sdk.mcp_server
+RECOMMENDED WORKFLOW:
 
-For Claude Desktop / Cursor, add to config:
-    {
-        "mcpServers": {
-            "invariant": {
-                "command": "python",
-                "args": ["-m", "invariant_sdk.mcp_server"],
-                "cwd": "/path/to/your/project"
-            }
-        }
-    }
+  1. status() — Check what's indexed, how many edges
+  
+  2. locate(issue_text) — Finds 5 best files from 1000+
+     Input: paste the error, issue, or task description
+     Output: ranked files with scores (score=32 means 5 concepts matched)
+     
+  3. semantic_map(file) — Get file skeleton (10x cheaper than reading)
+     Shows: key concepts, connections, line numbers
+     
+  4. prove_path(A, B) — Verify "A relates to B" before stating it
+     Returns: exists=True/False + witness path
+     
+  5. ingest(file) — Add new files to the index
 
-Theory:
-    See INVARIANTS.md for the physics behind this.
-    - σ-facts = grounded in documents (provable)
-    - α-facts = global crystal (axioms)
-    - ctx_hash = semantic checksum for drift detection
+WHY USE THIS INSTEAD OF GREP/FILE READ:
+- locate() gives ONE ranked list, not N separate grep results
+- semantic_map() costs ~50 tokens, full file costs ~5000 tokens
+- prove_path() prevents hallucinations about connections
+
+THEORY:
+σ-edges = proven in documents, λ-edges = inferred connections
 """
 from __future__ import annotations
 
@@ -80,9 +86,21 @@ def _ensure_initialized():
 @mcp.tool()
 def status() -> str:
     """
-    Get Invariant status: crystal connection, overlay stats, project info.
+    Check if Invariant is ready and what's indexed.
     
-    Use this first to check if Invariant is ready and what's indexed.
+    CALL THIS FIRST to see:
+    - How many files are indexed (overlay_docs)
+    - How many connections exist (overlay_edges)
+    - If crystal server is connected
+    
+    Example output:
+    {
+      "overlay_edges": 25402,
+      "overlay_docs": 3,
+      "overlay_labels": 2786
+    }
+    
+    If overlay_edges = 0, run ingest() on your project first.
     """
     _ensure_initialized()
     
@@ -100,20 +118,26 @@ def status() -> str:
 @mcp.tool()
 def locate(issue_text: str, max_results: int = 5) -> str:
     """
-    FIND: Locate relevant files from problem description (issue, traceback, error).
+    Find relevant files from an issue, error, or task description.
     
-    This is the Bisection Maximizer — collapses 1000 files to ~5 candidates
-    using Interference (A ∩ B) on seed terms.
+    USE INSTEAD OF: grep, ripgrep, file search
+    ADVANTAGE: Returns ONE ranked list with interference scoring (2^n)
     
-    Physics: Each word in issue_text is a "seed". Files that contain
-    intersections of multiple seeds are ranked higher.
+    Example:
+        locate("TypeError in user authentication module")
+        → Returns ranked files: auth.py (score=16), user.py (score=8)
+    
+    How scoring works:
+        score = 2^n where n = number of matching concepts
+        score=32 means 5 concepts matched → very relevant
+        score=2 means 1 concept matched → weak match
     
     Args:
-        issue_text: Bug report, error message, or problem description
-        max_results: Maximum files to return (default 5)
+        issue_text: Paste the error message, bug report, or task description
+        max_results: How many files to return (default 5)
     
     Returns:
-        JSON with ranked files: path, score, matching concepts, provenance
+        JSON with ranked files, matching concepts, and candidate line numbers
     """
     _ensure_initialized()
     
@@ -246,18 +270,21 @@ def locate(issue_text: str, max_results: int = 5) -> str:
 @mcp.tool()
 def semantic_map(file_path: str) -> str:
     """
-    UNDERSTAND: Get semantic skeleton of a file from overlay.
+    Get file structure without reading the whole file.
     
-    Returns σ-edges and key concepts (anchors) from this file.
-    This is 10-100x cheaper than reading the whole file.
-    
-    Args:
-        file_path: Path to the file (relative or absolute)
+    USE INSTEAD OF: reading the entire file into context
+    COST: ~50 tokens vs ~5000 tokens for full file
     
     Returns:
-        JSON with:
-        - anchors: key concepts with mass/phase
-        - edges: connections in reading order (σ-ring sorted first)
+        - anchors: key concepts with importance (mass)
+        - edges: connections between concepts with line numbers
+    
+    Example use case:
+        After locate() finds "auth.py", use semantic_map("auth.py")
+        to see its structure before deciding which lines to read.
+    
+    Args:
+        file_path: Path to the file
     """
     _ensure_initialized()
     
@@ -343,18 +370,26 @@ def semantic_map(file_path: str) -> str:
 @mcp.tool()
 def prove_path(source: str, target: str, max_hops: int = 5) -> str:
     """
-    Check if there's a proven connection between two concepts.
+    Verify a connection exists before claiming it.
     
-    This is the anti-hallucination tool. Before making claims about
-    relationships, verify them here.
+    USE BEFORE: stating "A is related to B" or "A affects B"
+    PREVENTS: hallucinating connections that don't exist
+    
+    Example:
+        prove_path("user", "database")
+        → {"exists": true, "path": ["user", "auth", "database"], "ring": "sigma"}
+        
+        prove_path("coffee", "database")  
+        → {"exists": false} — don't claim this connection!
+    
+    Ring types:
+        "sigma" = proven in documents (strong evidence)
+        "lambda" = inferred from language patterns (weaker)
     
     Args:
-        source: Source concept (word or phrase)
-        target: Target concept (word or phrase)
-        max_hops: Maximum path length to search (default 5)
-    
-    Returns:
-        JSON with exists (bool), witness path if found, and ring type (σ or λ)
+        source: First concept (e.g., "user", "authentication")
+        target: Second concept to check connection to
+        max_hops: How far to search (default 5)
     """
     _ensure_initialized()
     
