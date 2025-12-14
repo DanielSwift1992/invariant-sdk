@@ -407,6 +407,7 @@ HTML_PAGE = '''<!DOCTYPE html>
         
         .search-input {
             flex: 1;
+            width: 100%;
             padding: 14px 18px;
             font-size: 16px;
             background: var(--surface);
@@ -594,6 +595,10 @@ HTML_PAGE = '''<!DOCTYPE html>
         .result-word {
             font-weight: 500;
             font-size: 14px;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
         
         .result-weight {
@@ -608,11 +613,168 @@ HTML_PAGE = '''<!DOCTYPE html>
             font-size: 11px;
             font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
             flex: 1;
-            text-align: right;
+            display: flex;
+            justify-content: flex-end;
+            align-items: center;
+            gap: 0;
             margin: 0 12px;
             overflow: hidden;
             text-overflow: ellipsis;
             white-space: nowrap;
+        }
+
+        .result-loc .loc-file {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .result-loc .loc-line {
+            flex-shrink: 0;
+            margin-left: 0;
+            color: var(--text-2);
+        }
+
+        /* Mentions (uses in docs) */
+        .mentions {
+            margin-top: 16px;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: rgba(255,255,255,0.02);
+            overflow: hidden;
+        }
+
+        .mentions-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+            padding: 12px 14px;
+            background: rgba(17, 17, 19, 0.85);
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+
+        .mentions-title {
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--text-3);
+        }
+
+        .mentions-meta {
+            font-size: 11px;
+            color: var(--text-3);
+            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+        }
+
+        .mentions-body {
+            padding: 12px 14px;
+        }
+
+        .mentions-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .mentions-actions .mini-btn {
+            padding: 6px 10px;
+            font-size: 12px;
+        }
+
+        .mentions-list {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .mention-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            border: 1px solid transparent;
+            background: rgba(255,255,255,0.02);
+            cursor: pointer;
+        }
+
+        .mention-item:hover {
+            border-color: rgba(59,130,246,0.35);
+            background: rgba(59,130,246,0.06);
+        }
+
+        .mention-loc {
+            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 12px;
+            color: var(--text);
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .mention-loc .mention-file {
+            min-width: 0;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .mention-loc .mention-line {
+            flex-shrink: 0;
+            color: var(--text-2);
+        }
+
+        .mention-badge {
+            font-size: 10px;
+            padding: 3px 6px;
+            border-radius: 6px;
+            background: rgba(34, 197, 94, 0.12);
+            color: rgba(34, 197, 94, 0.95);
+            border: 1px solid rgba(34, 197, 94, 0.22);
+            flex-shrink: 0;
+        }
+
+        .context-panel {
+            margin-top: 12px;
+            border: 1px solid rgba(255,255,255,0.08);
+            border-radius: 12px;
+            background: rgba(17, 17, 19, 0.65);
+            overflow: hidden;
+        }
+
+        .context-panel-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 12px;
+            background: rgba(17, 17, 19, 0.85);
+            border-bottom: 1px solid rgba(255,255,255,0.06);
+        }
+
+        .context-panel-title {
+            font-size: 12px;
+            color: var(--text-2);
+            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 68%;
+        }
+
+        .context-panel-body {
+            padding: 12px;
+            white-space: pre-wrap;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            line-height: 1.5;
+            color: var(--text);
         }
         
         .badge {
@@ -1586,6 +1748,20 @@ HTML_PAGE = '''<!DOCTYPE html>
 	                        </div>
 	                        <iframe id="miniGraphFrame" class="graph-frame" src="${miniSrc}"></iframe>
 	                    </div>
+                        <div class="mentions" id="mentions">
+                            <div class="mentions-header">
+                                <div class="mentions-title">Mentions (σ)</div>
+                                <div class="mentions-meta" id="mentionsMeta">—</div>
+                            </div>
+                            <div class="mentions-body">
+                                <div class="mentions-actions">
+                                    <button class="mini-btn" id="mentionsScanBtn" type="button">Scan all docs</button>
+                                    <span style="color:var(--text-3);font-size:12px;">Click a mention to preview context</span>
+                                </div>
+                                <div id="mentionsBody"><div class="tree-empty">Select a document (left) to see uses, or scan all documents.</div></div>
+                                <div id="mentionsContext" class="context-panel" style="display:none;"></div>
+                            </div>
+                        </div>
 	            `;
             
             // Group by orbit (physics from INVARIANTS.md)
@@ -1620,13 +1796,14 @@ HTML_PAGE = '''<!DOCTYPE html>
                             'badge-alpha';
 	                    const badge = `<span class="badge ${badgeClass}" title="${escHtml(ringTitle)}">${ringLabel}</span>`;
 	                    
-	                    // Build location info with line number
-	                    let locInfo = '';
-	                    if (n.doc) {
-	                        locInfo = n.doc;
-	                        if (n.line) {
-	                            locInfo += ':' + n.line;
-	                        }
+	                    // Build location info with a non-truncated line number.
+	                    const docStr = n.doc ? String(n.doc) : '';
+	                    const lineStr = (n.line != null) ? String(n.line) : '';
+	                    let locHtml = '';
+	                    if (docStr && lineStr) {
+	                        locHtml = `<span class="result-loc" title="${escHtml(docStr + ':' + lineStr)}"><span class="loc-file">${escHtml(docStr)}</span><span class="loc-line">:${escHtml(lineStr)}</span></span>`;
+	                    } else if (docStr) {
+	                        locHtml = `<span class="result-loc" title="${escHtml(docStr)}">${escHtml(docStr)}</span>`;
 	                    }
 	                    
 	                    let tooltip = ringTitle;
@@ -1642,7 +1819,7 @@ HTML_PAGE = '''<!DOCTYPE html>
 	                            title="${escHtml(tooltip)}"
 	                            ${dataAttrs}>
 	                            <span class="result-word">${labelText}</span>
-                                ${locInfo ? `<span class="result-loc">${escHtml(locInfo)}</span>` : ''}
+                                ${locHtml}
 	                            <span class="result-weight">${weight}</span>
 	                            ${badge}
 	                        </li>
@@ -1681,11 +1858,233 @@ HTML_PAGE = '''<!DOCTYPE html>
 		                    }
 		                });
 		            });
+
+                    // Mentions: where this concept appears in σ sources (doc/line).
+                    setupMentions(data);
 	        }
         
 	        let contextCache = {};
 	        let contextTooltip = null;
             let ctxHideTimer = null;
+
+            let mentionsCache = {};
+
+            function setupMentions(data) {
+                const bodyEl = document.getElementById('mentionsBody');
+                const metaEl = document.getElementById('mentionsMeta');
+                const scanBtn = document.getElementById('mentionsScanBtn');
+                const ctxPanel = document.getElementById('mentionsContext');
+                if (!bodyEl || !metaEl) return;
+
+                if (ctxPanel) ctxPanel.style.display = 'none';
+                metaEl.textContent = '—';
+
+                const q = String((data && data.query) || '').trim();
+                if (!q || q.indexOf(' ') >= 0) {
+                    if (scanBtn) scanBtn.style.display = 'none';
+                    bodyEl.innerHTML = '<div class="tree-empty">Mentions are available for single-word queries.</div>';
+                    return;
+                }
+
+                if (scanBtn) {
+                    scanBtn.style.display = selectedDoc ? 'none' : 'inline-flex';
+                    scanBtn.onclick = async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        await loadMentions(q, '');
+                    };
+                }
+
+                if (selectedDoc) {
+                    bodyEl.innerHTML = '<div class="loading"><span class="spinner"></span>Scanning ' + escHtml(selectedDoc) + '...</div>';
+                    loadMentions(q, selectedDoc);
+                } else {
+                    bodyEl.innerHTML = '<div class="tree-empty">Select a document (left) to see uses, or scan all documents.</div>';
+                }
+            }
+
+            async function loadMentions(query, doc) {
+                const bodyEl = document.getElementById('mentionsBody');
+                const metaEl = document.getElementById('mentionsMeta');
+                const key = (doc || '') + '|' + String(query || '').toLowerCase();
+                if (!bodyEl || !metaEl) return;
+
+                if (mentionsCache[key]) {
+                    renderMentions(mentionsCache[key], query);
+                    return;
+                }
+
+                bodyEl.innerHTML = '<div class="loading"><span class="spinner"></span>Scanning documents...</div>';
+                metaEl.textContent = '…';
+                try {
+                    let url = '/api/mentions?q=' + encodeURIComponent(query);
+                    if (doc) url += '&doc=' + encodeURIComponent(doc);
+                    const res = await fetch(url);
+                    const data = await res.json();
+                    mentionsCache[key] = data || {};
+                    renderMentions(mentionsCache[key], query);
+                } catch (e) {
+                    bodyEl.innerHTML = '<div class="tree-empty">Could not scan documents.</div>';
+                    metaEl.textContent = '—';
+                }
+            }
+
+            function renderMentions(data, query) {
+                const bodyEl = document.getElementById('mentionsBody');
+                const metaEl = document.getElementById('mentionsMeta');
+                if (!bodyEl || !metaEl) return;
+
+                const mentions = Array.isArray(data.mentions) ? data.mentions : [];
+                const total = (data.total != null) ? Number(data.total) : mentions.length;
+
+                const docsSet = new Set();
+                mentions.forEach(m => { if (m && m.doc) docsSet.add(String(m.doc)); });
+
+                if (!mentions.length) {
+                    metaEl.textContent = '0 matches';
+                    bodyEl.innerHTML = '<div class="tree-empty">No matches in local documents.</div>';
+                    return;
+                }
+
+                const docsCount = docsSet.size;
+                metaEl.textContent = String(total || mentions.length) + ' matches' + (docsCount ? (' • ' + docsCount + ' files') : '');
+
+                const byDoc = {};
+                mentions.forEach(m => {
+                    const d = String(m.doc || '');
+                    if (!d) return;
+                    if (!byDoc[d]) byDoc[d] = [];
+                    byDoc[d].push(m);
+                });
+
+                let html = '';
+                Object.keys(byDoc).sort((a, b) => a.localeCompare(b)).forEach(doc => {
+                    const rows = (byDoc[doc] || []).slice();
+                    rows.sort((a, b) => (Number(a.line) || 0) - (Number(b.line) || 0));
+                    const docEsc = escHtml(doc);
+                    html += `
+                        <div style="margin-bottom:12px;">
+                            <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:8px;">
+                                <div style="font-weight:600;font-size:12px;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${docEsc}</div>
+                                <div style="font-size:11px;color:var(--text-3);font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;flex-shrink:0;">${rows.length} matches</div>
+                            </div>
+                            <ul class="mentions-list">
+                    `;
+                    rows.slice(0, 24).forEach(m => {
+                        const line = (m.line != null) ? String(m.line) : '?';
+                        const ctxHash = m.ctx_hash ? String(m.ctx_hash) : '';
+                        html += `
+                            <li class="mention-item" data-doc="${docEsc}" data-line="${escHtml(line)}" data-ctx-hash="${escHtml(ctxHash)}" data-word="${encodeURIComponent(query)}">
+                                <span class="mention-loc"><span class="mention-file">${docEsc}</span><span class="mention-line">:${escHtml(line)}</span></span>
+                                <span class="mention-badge">σ</span>
+                            </li>
+                        `;
+                    });
+                    html += '</ul></div>';
+                });
+
+                bodyEl.innerHTML = html;
+
+                bodyEl.querySelectorAll('.mention-item').forEach(el => {
+                    el.addEventListener('click', async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const doc = String(el.dataset.doc || '');
+                        const line = String(el.dataset.line || '');
+                        const ctxHash = String(el.dataset.ctxHash || '');
+                        const word = safeDecode(el.dataset.word || '') || String(query || '');
+                        const q = String(query || '').trim();
+                        if (!doc || !line) return;
+                        await showMentionContext(doc, line, ctxHash, word, q);
+                    });
+                });
+            }
+
+            async function showMentionContext(doc, line, ctxHash, word, query) {
+                const panel = document.getElementById('mentionsContext');
+                if (!panel) return;
+                panel.style.display = 'block';
+                panel.innerHTML = '<div class="loading" style="padding:12px;"><span class="spinner"></span>Loading context...</div>';
+
+                const key = doc + ':' + line + ':' + (ctxHash || '');
+                if (!contextCache[key]) {
+                    try {
+                        let url = '/api/context?doc=' + encodeURIComponent(doc) + '&line=' + encodeURIComponent(line);
+                        if (ctxHash) url += '&ctx_hash=' + encodeURIComponent(ctxHash);
+                        const res = await fetch(url);
+                        const data = await res.json();
+                        contextCache[key] = data || {};
+                    } catch (e) {
+                        contextCache[key] = { error: 'Could not load context', status: 'broken' };
+                    }
+                }
+
+                const ctx = contextCache[key] || {};
+                const status = String(ctx.status || 'unchecked');
+                const statusText =
+                    status === 'fresh' ? '✓ σ-fresh' :
+                    status === 'relocated' ? '↔ σ-relocated' :
+                    status === 'broken' ? '✗ σ-broken' :
+                    '… unchecked';
+                const statusColor =
+                    status === 'fresh' ? 'var(--success)' :
+                    status === 'relocated' ? 'var(--warning)' :
+                    status === 'broken' ? 'var(--danger)' :
+                    'var(--text-2)';
+
+                const lineInfo = (ctx.actual_line && ctx.actual_line != ctx.requested_line)
+                    ? (ctx.requested_line + '→' + ctx.actual_line)
+                    : String(ctx.actual_line || ctx.requested_line || line);
+
+                const anchor = String(ctx.anchor_word || word || '').trim();
+                const edgeInfo = (query && anchor && query !== anchor)
+                    ? ('Edge: ' + query + ' → ' + anchor)
+                    : '';
+
+                function escapeRegExp(s) {
+                    return String(s).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
+                }
+                function highlight(text, needle) {
+                    const escaped = escHtml(String(text || ''));
+                    const n = String(needle || '').trim();
+                    if (!n) return escaped;
+                    try {
+                        const re = new RegExp(escapeRegExp(n), 'ig');
+                        return escaped.replace(re, (m) => '<span style="background:rgba(59,130,246,0.18);border:1px solid rgba(59,130,246,0.28);padding:0 2px;border-radius:4px;">' + m + '</span>');
+                    } catch (e) {
+                        return escaped;
+                    }
+                }
+
+                const bodyText = ctx.content
+                    ? String(ctx.content)
+                    : (ctx.error ? ('Error: ' + String(ctx.error)) : '');
+
+                panel.innerHTML = `
+                    <div class="context-panel-header">
+                        <div class="context-panel-title">${escHtml('📄 ' + doc + ':' + lineInfo)}</div>
+                        <div style="display:flex;gap:8px;flex-shrink:0;">
+                            <button class="mini-btn" type="button" data-open="vscode">VS Code</button>
+                            <button class="mini-btn" type="button" data-open="open">Open</button>
+                            <button class="mini-btn" type="button" data-open="reveal">Reveal</button>
+                        </div>
+                    </div>
+                    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;padding:8px 12px;border-bottom:1px solid rgba(255,255,255,0.06);">
+                        <div style="color:${statusColor};font-size:11px;">${escHtml(statusText)}</div>
+                        <div style="color:var(--text-3);font-size:11px;">${escHtml(edgeInfo)}</div>
+                    </div>
+                    <div class="context-panel-body">${highlight(bodyText, anchor || word)}</div>
+                `;
+
+                panel.querySelectorAll('button[data-open]').forEach(btn => {
+                    btn.onclick = async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const mode = btn.dataset.open;
+                        await openDoc(mode, doc, line, ctxHash);
+                    };
+                });
+            }
 	        
 	        async function showContext(element, doc, line, ctxHash, word, query) {
 	            const key = doc + ':' + line + ':' + (ctxHash || '');

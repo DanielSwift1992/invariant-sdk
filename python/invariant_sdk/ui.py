@@ -85,6 +85,8 @@ class UIHandler(BaseHTTPRequestHandler):
             self.api_search(parsed.query)
         elif parsed.path == '/api/suggest':
             self.api_suggest(parsed.query)
+        elif parsed.path == '/api/mentions':
+            self.api_mentions(parsed.query)
         elif parsed.path == '/api/graph':
             self.api_graph(parsed.query)
         elif parsed.path == '/api/docs':
@@ -912,6 +914,115 @@ class UIHandler(BaseHTTPRequestHandler):
         unique.sort(key=lambda x: (0 if x['source'] == 'local' else 1, x['word'].lower()))
         
         self.send_json({'suggestions': unique[:10]})
+
+    def api_mentions(self, query_string: str):
+        """
+        List local document mentions (doc:line) for a single-word query.
+
+        Theory alignment:
+        - No snippets are stored (Invariant III / MDL).
+        - Returns only coordinates (+ ctx_hash) so UI can fetch /api/context lazily.
+        """
+        overlay = UIHandler.overlay
+        params = urllib.parse.parse_qs(query_string or "")
+        q_raw = (params.get('q', [''])[0] or '').strip()
+        doc_filter = (params.get('doc', [''])[0] or '').strip()
+
+        try:
+            limit_total = int((params.get('limit', ['80'])[0] or '').strip() or 80)
+        except Exception:
+            limit_total = 80
+        try:
+            limit_per_doc = int((params.get('limit_per_doc', ['24'])[0] or '').strip() or 24)
+        except Exception:
+            limit_per_doc = 24
+
+        if not q_raw:
+            self.send_json({'error': 'No query'}, 400)
+            return
+
+        parts = q_raw.split()
+        if len(parts) != 1:
+            self.send_json({'query': q_raw, 'doc': doc_filter or None, 'total': 0, 'mentions': []})
+            return
+
+        if not overlay:
+            self.send_json({'query': q_raw, 'doc': doc_filter or None, 'total': 0, 'mentions': []})
+            return
+
+        needle = parts[0].strip().lower()
+        if not needle:
+            self.send_json({'query': q_raw, 'doc': doc_filter or None, 'total': 0, 'mentions': []})
+            return
+
+        # Determine which docs to scan (bounded by overlay knowledge).
+        docs_set: set[str] = set()
+        for _src, edge_list in overlay.edges.items():
+            for edge in edge_list:
+                if edge.doc:
+                    docs_set.add(edge.doc)
+
+        if doc_filter:
+            docs = [doc_filter]
+        else:
+            docs = sorted(docs_set)
+
+        import hashlib
+
+        def ctx_hash_at(tokens: list[tuple[str, int]], token_idx: int, k: int = 2) -> str:
+            start = max(0, token_idx - k)
+            end = min(len(tokens), token_idx + k + 1)
+            normalized = ' '.join(tokens[i][0].lower() for i in range(start, end))
+            return hashlib.sha256(normalized.encode('utf-8')).hexdigest()[:8]
+
+        pat = re.compile(rf'\b{re.escape(needle)}\b', re.IGNORECASE)
+        out: list[dict] = []
+
+        for doc in docs:
+            if len(out) >= limit_total:
+                break
+            doc_path, _searched = self._resolve_doc_path(doc)
+            if not doc_path or not doc_path.exists() or not doc_path.is_file():
+                continue
+            try:
+                text = doc_path.read_text(encoding='utf-8')
+            except Exception:
+                continue
+            if not text.strip():
+                continue
+
+            # Find matching lines (bounded).
+            lines = text.split('\n')
+            matched_lines: list[int] = []
+            for i, line in enumerate(lines, 1):
+                if pat.search(line):
+                    matched_lines.append(i)
+                    if len(matched_lines) >= limit_per_doc or (len(out) + len(matched_lines)) >= limit_total:
+                        break
+
+            if not matched_lines:
+                continue
+
+            # Compute ctx_hash for the first occurrence of the needle on each line (k=2 anchor window).
+            tokens = self._tokenize_file(text)
+            idxs_by_line: dict[int, list[int]] = {}
+            for idx, (w, ln) in enumerate(tokens):
+                if w == needle:
+                    idxs_by_line.setdefault(ln, []).append(idx)
+
+            for ln in matched_lines:
+                if len(out) >= limit_total:
+                    break
+                ctx_hash = None
+                idxs = idxs_by_line.get(ln)
+                if idxs:
+                    try:
+                        ctx_hash = ctx_hash_at(tokens, idxs[0])
+                    except Exception:
+                        ctx_hash = None
+                out.append({'doc': doc, 'line': ln, 'ctx_hash': ctx_hash})
+
+        self.send_json({'query': q_raw, 'doc': doc_filter or None, 'total': len(out), 'mentions': out})
     
     def api_ingest(self):
         """Ingest document via POST."""
