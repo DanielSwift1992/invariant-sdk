@@ -54,7 +54,7 @@ def _ensure_initialized():
     from invariant_sdk.overlay import OverlayGraph
     
     # Connect to crystal server
-    server_url = os.environ.get("INVARIANT_SERVER", "https://orb.invarianthub.com")
+    server_url = os.environ.get("INVARIANT_SERVER", "http://165.22.145.158:8080")
     _physics = HaloPhysics(server_url)
     
     # Load overlay if exists
