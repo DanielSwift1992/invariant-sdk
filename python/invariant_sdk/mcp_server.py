@@ -270,6 +270,145 @@ def prove_path(source: str, target: str, max_hops: int = 5) -> str:
 
 
 @mcp.tool()
+def prove_paths_batch(pairs: list) -> str:
+    """
+    Verify multiple concept connections at once (batch version of prove_path).
+    
+    More efficient than calling prove_path multiple times.
+    
+    Args:
+        pairs: List of [source, target] pairs to verify, e.g. [["user", "auth"], ["api", "database"]]
+    
+    Returns:
+        JSON with results for each pair: {pair: [src, tgt], exists: bool, ring: str|null}
+    """
+    _ensure_initialized()
+    
+    results = []
+    for pair in pairs:
+        if len(pair) != 2:
+            results.append({"pair": pair, "error": "Invalid pair format"})
+            continue
+        
+        src, tgt = pair
+        result = json.loads(prove_path(src, tgt, max_hops=4))
+        results.append({
+            "pair": [src, tgt],
+            "exists": result.get("exists", False),
+            "ring": result.get("ring"),
+            "path": result.get("path"),
+            "provenance": result.get("provenance"),
+        })
+    
+    return json.dumps({
+        "total": len(results),
+        "proven": sum(1 for r in results if r.get("exists")),
+        "results": results,
+    }, indent=2)
+
+
+@mcp.tool()
+def search_concept(concept: str, limit: int = 20) -> str:
+    """
+    Find all documents and locations where a concept appears.
+    
+    Use this to understand where a term is used across the project.
+    
+    Args:
+        concept: Word or phrase to search for
+        limit: Maximum results (default 20)
+    
+    Returns:
+        JSON with all occurrences: doc, line, related concepts
+    """
+    _ensure_initialized()
+    
+    from invariant_sdk.cli import hash8_hex
+    
+    concept_hash = hash8_hex(f"Ġ{concept.lower()}")
+    occurrences = []
+    
+    # Find edges where this concept is source or target
+    for src, edges in _overlay.edges.items():
+        for edge in edges:
+            src_label = _overlay.get_label(src) or ""
+            tgt_label = _overlay.get_label(edge.tgt) or ""
+            
+            if concept.lower() in src_label.lower() or concept.lower() in tgt_label.lower():
+                occurrences.append({
+                    "doc": edge.doc,
+                    "line": edge.line,
+                    "src": src_label,
+                    "tgt": tgt_label,
+                    "ring": edge.ring,
+                })
+            
+            if len(occurrences) >= limit:
+                break
+        if len(occurrences) >= limit:
+            break
+    
+    # Group by document
+    by_doc = {}
+    for occ in occurrences:
+        doc = occ.get("doc") or "unknown"
+        if doc not in by_doc:
+            by_doc[doc] = []
+        by_doc[doc].append(occ)
+    
+    return json.dumps({
+        "concept": concept,
+        "total_occurrences": len(occurrences),
+        "documents": len(by_doc),
+        "by_document": by_doc,
+    }, indent=2)
+
+
+@mcp.tool()
+def list_docs() -> str:
+    """
+    List all indexed documents with their stats.
+    
+    Use this to see what's in the knowledge base.
+    
+    Returns:
+        JSON with documents: path, edge count, key concepts
+    """
+    _ensure_initialized()
+    
+    docs = {}
+    for src, edges in _overlay.edges.items():
+        for edge in edges:
+            doc = edge.doc or "unknown"
+            if doc not in docs:
+                docs[doc] = {"edges": 0, "concepts": set()}
+            docs[doc]["edges"] += 1
+            
+            src_label = _overlay.get_label(src)
+            tgt_label = _overlay.get_label(edge.tgt)
+            if src_label:
+                docs[doc]["concepts"].add(src_label)
+            if tgt_label:
+                docs[doc]["concepts"].add(tgt_label)
+    
+    result = []
+    for doc, info in sorted(docs.items(), key=lambda x: x[1]["edges"], reverse=True):
+        result.append({
+            "doc": doc,
+            "edges": info["edges"],
+            "concepts": len(info["concepts"]),
+            "top_concepts": list(info["concepts"])[:5],
+        })
+    
+    return json.dumps({
+        "total_documents": len(result),
+        "total_edges": sum(d["edges"] for d in result),
+        "documents": result,
+    }, indent=2)
+
+
+
+@mcp.tool()
 def list_conflicts() -> str:
     """
     Get all detected conflicts in the overlay.
