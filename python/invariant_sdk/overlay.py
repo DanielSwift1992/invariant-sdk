@@ -168,11 +168,13 @@ class OverlayGraph:
                     tgt=tgt, weight=weight, doc=doc, ring=ring,
                     phase=phase, line=line, ctx_hash=ctx_hash
                 )
-                # Check for conflicts (same src->tgt with different docs/weights)
-                existing = [e for e in self.edges[src] if e.tgt == tgt]
-                for e in existing:
-                    if e.doc != doc or abs(e.weight - weight) > 0.01:
-                        self.conflicts.append((e, new_edge))
+                # Check for σ-conflicts (INVARIANTS.md line 126: both edges must be ∈ σ)
+                # λ-edges are navigation, not facts — they cannot conflict
+                if ring == "sigma":
+                    existing = [e for e in self.edges[src] if e.tgt == tgt and e.ring == "sigma"]
+                    for e in existing:
+                        if e.doc != doc:  # Different source = conflict
+                            self.conflicts.append((e, new_edge))
                 self.edges[src].append(new_edge)
         
         elif op == "sub":
@@ -189,17 +191,17 @@ class OverlayGraph:
     
     def merge(self, other: "OverlayGraph") -> None:
         """Merge another overlay into this one (other takes priority)."""
-        # Merge edges + keep conflicts (cascade load previously dropped them).
-        # Conflict heuristic (current implementation): same src->tgt seen with different provenance/weight.
-        # NOTE: This is not the full σ-Conflict definition from INVARIANTS.md (which requires a predicate).
+        # Merge edges + detect σ-conflicts (INVARIANTS.md line 126)
+        # Only σ-edges can conflict — λ-edges are navigation, not facts
         for src, edge_list in other.edges.items():
             existing = self.edges.get(src, [])
             for new_edge in edge_list:
-                for e in existing:
-                    if e.tgt != new_edge.tgt:
-                        continue
-                    if e.doc != new_edge.doc or abs(e.weight - new_edge.weight) > 0.01:
-                        self.conflicts.append((e, new_edge))
+                if new_edge.ring == "sigma":
+                    for e in existing:
+                        if e.tgt != new_edge.tgt or e.ring != "sigma":
+                            continue
+                        if e.doc != new_edge.doc:  # Different source = conflict
+                            self.conflicts.append((e, new_edge))
             self.edges[src].extend(edge_list)
         
         self.suppressed.update(other.suppressed)

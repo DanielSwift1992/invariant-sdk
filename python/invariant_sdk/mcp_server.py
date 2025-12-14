@@ -194,38 +194,24 @@ def locate(issue_text: str, max_results: int = 0) -> str:
     except Exception as e:
         return json.dumps({"error": f"Crystal connection failed: {e}"})
     
-    # Create lookup for all query words
-    all_seeds = solid_seeds + gas_seeds
-    seed_lookup = {h8: (word, mass) for word, h8, mass in all_seeds}
-    word_lookup = {word: (h8, mass) for word, h8, mass in all_seeds}
+    # Create lookup for ALL query words (not just crystal-classified)
+    # Crystal classification is OPTIONAL (provides mass), not a filter
+    all_word_hashes = word_hashes  # All query words
+    word_mass_lookup = {word: mass for word, h8, mass in solid_seeds + gas_seeds}
     
-    # Interference: find files containing multiple query words
-    file_scores = {}  # doc -> {solid_count, gas_count, words, lines}
+    # Search overlay for ALL query words
+    file_scores = {}  # doc -> {words, lines}
     
-    for src, edges in _overlay.edges.items():
-        src_label = (_overlay.get_label(src) or "").lower()
-        for edge in edges:
+    for word, h8 in all_word_hashes.items():
+        # Check if this word has edges in overlay
+        for edge in _overlay.edges.get(h8, []):
             if not edge.doc:
                 continue
-            tgt_label = (_overlay.get_label(edge.tgt) or "").lower()
-            
-            # Check which query words match
-            matched = []
-            for word, (h8, mass) in word_lookup.items():
-                if word == src_label or word == tgt_label or src == h8 or edge.tgt == h8:
-                    matched.append((word, mass))
-            
-            if matched:
-                if edge.doc not in file_scores:
-                    file_scores[edge.doc] = {"solid_count": 0, "gas_count": 0, "words": set(), "lines": []}
-                for word, mass in matched:
-                    file_scores[edge.doc]["words"].add(word)
-                    if mass > _physics.mean_mass:
-                        file_scores[edge.doc]["solid_count"] += 1
-                    else:
-                        file_scores[edge.doc]["gas_count"] += 1
-                if edge.line and edge.line not in file_scores[edge.doc]["lines"]:
-                    file_scores[edge.doc]["lines"].append(edge.line)
+            if edge.doc not in file_scores:
+                file_scores[edge.doc] = {"words": set(), "lines": []}
+            file_scores[edge.doc]["words"].add(word)
+            if edge.line and edge.line not in file_scores[edge.doc]["lines"]:
+                file_scores[edge.doc]["lines"].append(edge.line)
     
     # Calculate score: solid matches = 2^n, gas matches add 1 each
     # This is theory: solid = high information, gas = low information
