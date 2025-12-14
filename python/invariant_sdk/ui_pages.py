@@ -627,9 +627,9 @@ HTML_PAGE = '''<!DOCTYPE html>
 
                 <!-- Mode Tabs -->
                 <div class="mode-tabs" style="display:flex;gap:8px;margin-bottom:16px;">
-                    <button class="mode-tab active" data-mode="search" onclick="setMode('search')">🔍 Explore</button>
-                    <button class="mode-tab" data-mode="verify" onclick="setMode('verify')">✓ Verify</button>
-                    <button class="mode-tab" data-mode="conflicts" onclick="setMode('conflicts')">⚠️ Conflicts</button>
+                    <button class="mode-tab active" data-mode="search" onclick="setMode('search')">Explore</button>
+                    <button class="mode-tab" data-mode="verify" onclick="setMode('verify')">Verify</button>
+                    <button class="mode-tab" data-mode="conflicts" onclick="setMode('conflicts')">Conflicts</button>
                 </div>
 
                 <style>
@@ -790,24 +790,23 @@ HTML_PAGE = '''<!DOCTYPE html>
                 }
                 resultDiv.innerHTML = '<div class="loading"><span class="spinner"></span>Checking connection...</div>';
                 try {
-                    const res = await fetch('/api/verify?src=' + encodeURIComponent(src) + '&tgt=' + encodeURIComponent(tgt));
+                    const res = await fetch('/api/verify?subject=' + encodeURIComponent(src) + '&object=' + encodeURIComponent(tgt));
                     const data = await res.json();
-                    if (data.exists) {
+                    if (data.proven) {
                         const pathStr = (data.path || []).join(' → ');
                         resultDiv.innerHTML = `
                             <div class="results" style="background:rgba(34,197,94,0.05);border-color:rgba(34,197,94,0.2);">
-                                <h3 style="color:var(--success);">✓ Connection Proven</h3>
+                                <h3 style="color:var(--success);">Connection Proven</h3>
                                 <p style="margin:12px 0;font-size:14px;"><strong>Path:</strong> ${escHtml(pathStr)}</p>
                                 <p style="color:var(--text-3);font-size:12px;">
-                                    Ring: ${data.ring || 'σ'} • 
-                                    ${data.provenance ? 'Source: ' + escHtml(data.provenance) : 'From overlay'}
+                                    ${data.sources?.length ? 'Sources: ' + data.sources.map(s => escHtml(s)).join(', ') : 'From overlay'}
                                 </p>
                             </div>
                         `;
                     } else {
                         resultDiv.innerHTML = `
                             <div class="results" style="background:rgba(239,68,68,0.05);border-color:rgba(239,68,68,0.2);">
-                                <h3 style="color:var(--danger);">✗ No Path Found</h3>
+                                <h3 style="color:var(--danger);">No Path Found</h3>
                                 <p style="margin-top:8px;color:var(--text-2);">"${escHtml(src)}" is not connected to "${escHtml(tgt)}" in your documents.</p>
                             </div>
                         `;
@@ -828,7 +827,7 @@ HTML_PAGE = '''<!DOCTYPE html>
                         listDiv.innerHTML = '<div class="empty"><h3>No Conflicts</h3><p>All facts are consistent</p></div>';
                         return;
                     }
-                    let html = '<p style="margin-bottom:16px;color:var(--warning);font-weight:500;">⚠️ ' + conflicts.length + ' conflicts detected</p>';
+                    let html = '<p style="margin-bottom:16px;color:var(--warning);font-weight:500;">' + conflicts.length + ' conflicts detected</p>';
                     conflicts.slice(0, 30).forEach(c => {
                         html += `
                             <div class="conflict-item">
