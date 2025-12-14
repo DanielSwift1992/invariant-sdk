@@ -600,6 +600,19 @@ HTML_PAGE = '''<!DOCTYPE html>
             color: var(--text-2);
             font-size: 12px;
             font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            flex-shrink: 0;
+        }
+        
+        .result-loc {
+            color: var(--text-3);
+            font-size: 11px;
+            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            flex: 1;
+            text-align: right;
+            margin: 0 12px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
         }
         
         .badge {
@@ -1616,18 +1629,7 @@ HTML_PAGE = '''<!DOCTYPE html>
 	                        }
 	                    }
 	                    
-	                    let tooltip = 'α-context from global crystal';
-                        if (isLocal) {
-                            if (ring === 'sigma') {
-                                tooltip = (n.doc && n.line) ? 'σ-edge — hover for context' : 'σ-edge (no provenance yet)';
-                            } else if (ring === 'lambda') {
-                                tooltip = (n.doc && n.line) ? 'λ-edge (navigation) — hover for context' : 'λ-edge (navigation, no provenance)';
-                            } else if (ring === 'eta') {
-                                tooltip = 'η (hypothesis)';
-                            } else {
-                                tooltip = 'Local edge';
-                            }
-                        }
+	                    let tooltip = ringTitle;
 	                    
 	                    // Add data attributes for lazy context loading
 	                    const dataAttrs = (n.doc && n.line) 
@@ -1640,7 +1642,8 @@ HTML_PAGE = '''<!DOCTYPE html>
 	                            title="${escHtml(tooltip)}"
 	                            ${dataAttrs}>
 	                            <span class="result-word">${labelText}</span>
-	                            <span class="result-weight">${weight}${locInfo ? ' • ' + escHtml(locInfo) : ''}</span>
+                                ${locInfo ? `<span class="result-loc">${escHtml(locInfo)}</span>` : ''}
+	                            <span class="result-weight">${weight}</span>
 	                            ${badge}
 	                        </li>
 	                    `;
