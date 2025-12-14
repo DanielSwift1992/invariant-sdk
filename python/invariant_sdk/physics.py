@@ -512,8 +512,12 @@ class HaloPhysics:
         if not object_hash:
             object_hash = hash8_hex(f"Ġ{object.lower()}")
         
-        # Check for σ-path
-        proven, path_edges = self._overlay.has_sigma_path(subject_hash, object_hash)
+        # Check for path (σ or λ edges)
+        # Theory: gas words can be traversed via λ-edges
+        found, path_edges, ring = self._overlay.has_path(subject_hash, object_hash)
+        
+        # σ-proof requires σ-ring path with provenance
+        proven = found and ring == "sigma"
         
         # Extract sources (document provenance)
         sources = []
@@ -533,19 +537,23 @@ class HaloPhysics:
                 })
         
         # Build message
-        if proven:
-            if sources:
+        if found:
+            if ring == "sigma" and sources:
                 message = f"σ-proven with provenance from: {', '.join(sources)}"
+            elif ring == "lambda":
+                message = f"λ-path found (via gas words). Weaker than σ-proof."
+                if sources:
+                    message += f" Sources: {', '.join(sources)}"
             else:
-                message = "σ-path exists but no document provenance (weak proof)"
+                message = "Path exists but no document provenance (weak proof)"
         else:
             if self._overlay.n_edges == 0:
                 message = "Overlay is empty. Ingest documents first."
             else:
-                message = f"No σ-path from '{subject}' to '{object}'. Assertion is unverified (η)."
+                message = f"No path from '{subject}' to '{object}'. Assertion is unverified (η)."
         
         return VerificationResult(
-            proven=proven and len(sources) > 0,  # Require provenance for true proof
+            proven=proven and len(sources) > 0,  # σ-proof requires provenance
             path=path_dicts,
             sources=sources,
             conflicts=conflicts,

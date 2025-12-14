@@ -11,6 +11,7 @@ Commands:
 from __future__ import annotations
 
 import argparse
+import math
 import re
 import sys
 from pathlib import Path
@@ -197,56 +198,87 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         # Tokenize WITH positions for provenance tracking (Invariant III: MDL)
         tokens_with_pos = tokenize_with_positions(text)
         
-        # Get list of words to check for anchors
-        words = [w for w, _, _, _ in tokens_with_pos]
-        anchors = get_anchors(client, words)
-        anchor_words = {w for w, _, _ in anchors}
-        
-        # Filter to only anchor tokens (with their positions)
-        anchor_tokens = [(w, line, cs, ce) for w, line, cs, ce in tokens_with_pos 
-                         if w in anchor_words]
-        
-        print(f"  Words: {len(words)}, Anchors: {len(anchor_tokens)}")
-        
-        if len(anchor_tokens) < 2:
-            print(f"  Skipping (too few anchors)")
+        if len(tokens_with_pos) < 2:
+            print(f"  Skipping (too few tokens)")
             continue
         
-        # Create edges between consecutive anchors with provenance coordinates
+        # Get phase classification for all unique words
+        words = [w for w, _, _, _ in tokens_with_pos]
+        unique_words = list(dict.fromkeys(words))[:200]  # Limit for batch query
+        
+        # Classify words as solid/gas
+        word_phases = {}  # word -> 'solid' | 'gas'
+        mean_mass = client.mean_mass
+        
+        for word in unique_words:
+            h8 = hash8_hex(f"Ġ{word}")
+            try:
+                result = client._client.get_halo_page(h8, limit=1)
+                degree = result.get("meta", {}).get("degree_total", 1)
+                mass = 1.0 / math.log(2 + degree) if degree > 0 else 0.5
+                word_phases[word] = "solid" if mass >= mean_mass else "gas"
+            except Exception:
+                word_phases[word] = "gas"  # Unknown = gas (conservative)
+        
+        solid_count = sum(1 for p in word_phases.values() if p == "solid")
+        gas_count = len(word_phases) - solid_count
+        print(f"  Words: {len(words)}, Solid: {solid_count}, Gas: {gas_count}")
+        
+        if solid_count < 1:
+            print(f"  Skipping (no solid anchors)")
+            continue
+        
+        # Create edges between consecutive tokens
+        # Logic (from INVARIANTS.md):
+        #   solid→solid = σ-edge (full provenance)
+        #   solid→gas = λ-edge (navigation)
+        #   gas→solid = λ-edge (reverse lookup)
+        #   gas→gas = skip (pure noise)
+        
         doc_name = str(file_path.relative_to(input_path) if input_path.is_dir() else file_path.name)
+        doc_edges = 0
         
-        # Build index map: anchor token index -> position in tokens_with_pos
-        anchor_indices = []
-        for i, (w, _, _, _) in enumerate(tokens_with_pos):
-            if w in anchor_words:
-                anchor_indices.append(i)
-        
-        for i in range(len(anchor_indices) - 1):
-            src_idx = anchor_indices[i]
-            tgt_idx = anchor_indices[i + 1]
+        for i in range(len(tokens_with_pos) - 1):
+            src_word, src_line, _, _ = tokens_with_pos[i]
+            tgt_word, tgt_line, _, _ = tokens_with_pos[i + 1]
             
-            src_word, src_line, _, _ = tokens_with_pos[src_idx]
-            tgt_word, tgt_line, _, _ = tokens_with_pos[tgt_idx]
+            src_phase = word_phases.get(src_word, "gas")
+            tgt_phase = word_phases.get(tgt_word, "gas")
+            
+            # Skip gas→gas (pure noise)
+            if src_phase == "gas" and tgt_phase == "gas":
+                continue
             
             src_hash = hash8_hex(f"Ġ{src_word}")
             tgt_hash = hash8_hex(f"Ġ{tgt_word}")
             
-            # Compute ctx_hash for target anchor (hash of word ±2 words)
-            ctx_hash = compute_ctx_hash(tokens_with_pos, tgt_idx, k=2)
+            # Determine ring based on phases
+            if src_phase == "solid" and tgt_phase == "solid":
+                ring = "sigma"  # Full σ-proof
+            else:
+                ring = "lambda"  # Navigation edge
+            
+            # Compute ctx_hash for target
+            ctx_hash = compute_ctx_hash(tokens_with_pos, i + 1, k=2)
             
             overlay.add_edge(
                 src_hash, tgt_hash, 
                 weight=1.0, 
                 doc=doc_name,
-                ring="sigma",
-                line=tgt_line,  # Line of target anchor
+                ring=ring,
+                phase=tgt_phase,
+                line=tgt_line,
                 ctx_hash=ctx_hash
             )
             overlay.define_label(src_hash, src_word)
             overlay.define_label(tgt_hash, tgt_word)
+            doc_edges += 1
             total_edges += 1
         
-        print(f"  Added {len(anchor_indices) - 1} edges with integrity")
+        sigma_edges = sum(1 for src, edges in overlay.edges.items() 
+                         for e in edges if e.ring == "sigma" and e.doc == doc_name)
+        lambda_edges = doc_edges - sigma_edges
+        print(f"  Added {doc_edges} edges (σ: {sigma_edges}, λ: {lambda_edges})")
     
     # Save overlay
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -313,34 +345,53 @@ def cmd_verify(args: argparse.Namespace) -> int:
                 if snippet:
                     print(f"      \"{snippet}\"")
     else:
-        print("❌ UNVERIFIED (η = hypothesis)")
-        print("=" * 50)
-        print()
-        print(result.message)
-        print()
-        print("Subject hash:", result.subject_hash[:12] + "...")
-        print("Object hash:", result.object_hash[:12] + "...")
-        print()
+        # Check if there's a λ-path (weaker than σ-proof)
+        has_lambda_path = "λ-path" in result.message
         
-        # Show what global crystal knows (context, not proof)
-        try:
-            concept = client.resolve(subject)
-            if concept.halo:
-                print("Global crystal context (α, not proof):")
-                for n in concept.halo[:5]:
-                    token = n.get("token", n.get("hash8", "")[:8])
-                    weight = n.get("weight", 0)
-                    print(f"  - {token} (w={weight:.2f})")
-        except Exception:
-            pass
-        
-        print()
-        print("To add documentary evidence: inv ingest <path-to-documents>")
+        if has_lambda_path:
+            print("⚡ λ-PATH FOUND (navigation)")
+            print("=" * 50)
+            print()
+            print(result.message)
+            print()
+            print("This is a connection via gas words (weaker than σ-proof).")
+            print("σ-proof requires solid→solid path.")
+            if result.path:
+                print()
+                print("Path:")
+                for edge in result.path:
+                    tgt_label = client._overlay.get_label(edge.get("hash8", "")) or edge.get("hash8", "")[:8]
+                    phase = edge.get("phase", "?")
+                    print(f"  → {tgt_label} [{phase}]")
+        else:
+            print("❌ UNVERIFIED (η = hypothesis)")
+            print("=" * 50)
+            print()
+            print(result.message)
+            print()
+            print("Subject hash:", result.subject_hash[:12] + "...")
+            print("Object hash:", result.object_hash[:12] + "...")
+            print()
+            
+            # Show what global crystal knows (context, not proof)
+            try:
+                concept = client.resolve(subject)
+                if concept.halo:
+                    print("Global crystal context (α, not proof):")
+                    for n in concept.halo[:5]:
+                        token = n.get("token", n.get("hash8", "")[:8])
+                        weight = n.get("weight", 0)
+                        print(f"  - {token} (w={weight:.2f})")
+            except Exception:
+                pass
+            
+            print()
+            print("To add documentary evidence: inv ingest <path-to-documents>")
     
     # Show conflicts if any
     if result.conflicts:
         print()
-        print("⚠️  CONFLICTS DETECTED:")
+        print("CONFLICTS DETECTED:")
         for conflict in result.conflicts:
             e1 = conflict.get("edge1", {})
             e2 = conflict.get("edge2", {})
@@ -348,7 +399,13 @@ def cmd_verify(args: argparse.Namespace) -> int:
             print(f"    vs {e2.get('doc', '?')} says {e2.get('weight', 0)}")
     
     print()
-    return 0 if result.proven else 2
+    # λ-path = exit 1 (partial), σ-proven = exit 0, unverified = exit 2
+    if result.proven:
+        return 0
+    elif has_lambda_path:
+        return 1
+    else:
+        return 2
 
 
 def cmd_ask(args: argparse.Namespace) -> int:

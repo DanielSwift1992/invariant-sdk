@@ -54,6 +54,7 @@ class OverlayEdge:
     weight: float
     doc: Optional[str] = None  # source document (provenance)
     ring: str = "sigma"  # sigma/lambda/eta
+    phase: str = "solid"  # solid/gas (target word phase)
     line: Optional[int] = None  # line number (1-indexed)
     ctx_hash: Optional[str] = None  # semantic checksum for drift detection
     
@@ -63,6 +64,7 @@ class OverlayEdge:
             "weight": self.weight, 
             "doc": self.doc,
             "ring": self.ring,
+            "phase": self.phase,
         }
         if self.line is not None:
             d["line"] = self.line
@@ -157,13 +159,14 @@ class OverlayGraph:
             weight = float(entry.get("w", 1.0))
             doc = entry.get("doc")
             ring = entry.get("ring", "sigma")  # default to sigma for backward compat
+            phase = entry.get("phase", "solid")  # default to solid for backward compat
             line = entry.get("line")  # line number
             ctx_hash = entry.get("ctx_hash")  # semantic checksum for integrity
             
             if src and tgt:
                 new_edge = OverlayEdge(
                     tgt=tgt, weight=weight, doc=doc, ring=ring,
-                    line=line, ctx_hash=ctx_hash
+                    phase=phase, line=line, ctx_hash=ctx_hash
                 )
                 # Check for conflicts (same src->tgt with different docs/weights)
                 existing = [e for e in self.edges[src] if e.tgt == tgt]
@@ -208,6 +211,7 @@ class OverlayGraph:
                         "tgt": edge.tgt, 
                         "w": edge.weight,
                         "ring": edge.ring,
+                        "phase": edge.phase,
                     }
                     if edge.doc:
                         entry["doc"] = edge.doc
@@ -232,6 +236,7 @@ class OverlayGraph:
         weight: float = 1.0, 
         doc: Optional[str] = None,
         ring: str = "sigma",
+        phase: str = "solid",
         line: Optional[int] = None,
         ctx_hash: Optional[str] = None,
     ) -> None:
@@ -244,13 +249,14 @@ class OverlayGraph:
             weight: Edge weight (typically 1.0 for facts)
             doc: Source document path (provenance for σ-proof)
             ring: 'sigma' (default), 'lambda', or 'eta'
+            phase: 'solid' (anchor) or 'gas' (LINK word)
             line: Line number (1-indexed) — approximate coordinate
             ctx_hash: Semantic checksum of anchor window (8 hex chars)
                       Used for drift detection and self-healing.
         """
         new_edge = OverlayEdge(
             tgt=tgt, weight=weight, doc=doc, ring=ring,
-            line=line, ctx_hash=ctx_hash
+            phase=phase, line=line, ctx_hash=ctx_hash
         )
         # Check for conflicts
         existing = [e for e in self.edges[src] if e.tgt == tgt]
@@ -342,6 +348,42 @@ class OverlayGraph:
                     queue.append((edge.tgt, path + [edge]))
         
         return (False, [])
+    
+    def has_path(self, src: str, tgt: str, max_hops: int = 3) -> Tuple[bool, List[OverlayEdge], str]:
+        """
+        Check if there's ANY path from src to tgt (σ or λ edges).
+        
+        This allows traversal through gas words (λ-edges).
+        
+        Returns:
+            (found: bool, path: List[OverlayEdge], ring: str)
+            ring is 'sigma' if ALL edges are σ, else 'lambda'
+        """
+        # Direct edge check (most common case)
+        for edge in self.edges.get(src, []):
+            if edge.tgt == tgt:
+                return (True, [edge], edge.ring)
+        
+        # BFS for multi-hop path
+        visited = {src}
+        queue = [(src, [])]
+        
+        while queue:
+            current, path = queue.pop(0)
+            
+            for edge in self.edges.get(current, []):
+                new_path = path + [edge]
+                
+                if edge.tgt == tgt:
+                    # Determine ring: sigma only if ALL edges are sigma
+                    ring = "sigma" if all(e.ring == "sigma" for e in new_path) else "lambda"
+                    return (True, new_path, ring)
+                
+                if edge.tgt not in visited and len(path) < max_hops:
+                    visited.add(edge.tgt)
+                    queue.append((edge.tgt, new_path))
+        
+        return (False, [], "")
     
     def get_conflicts(self) -> List[Tuple[OverlayEdge, OverlayEdge]]:
         """Get all detected conflicts (same edge, different values/sources)."""
