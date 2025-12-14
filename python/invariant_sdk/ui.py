@@ -1652,6 +1652,8 @@ class UIHandler(BaseHTTPRequestHandler):
         else:
             for base in (
                 project_root,
+                project_root.parent,  # Parent of overlay dir (often project root)
+                project_root.parent.parent,  # Two levels up (for nested structures)
                 project_root / '.invariant',
                 project_root / 'docs',
                 project_root / 'data',
@@ -1661,8 +1663,8 @@ class UIHandler(BaseHTTPRequestHandler):
                     resolved = (base / doc_rel).resolve()
                 except Exception:
                     continue
-                if project_root in resolved.parents or resolved == project_root:
-                    candidates.append(resolved)
+                # Add to candidates - we'll check existence later
+                candidates.append(resolved)
 
         for candidate in candidates:
             if candidate.exists() and candidate.is_file():
