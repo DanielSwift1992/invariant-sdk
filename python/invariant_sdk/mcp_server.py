@@ -11,9 +11,9 @@ RECOMMENDED WORKFLOW:
 
   1. status() — Check what's indexed, how many edges
   
-  2. locate(issue_text) — Finds 5 best files from 1000+
+  2. locate(issue_text) — Finds files ranked by interference score (2^n)
      Input: paste the error, issue, or task description
-     Output: ranked files with scores (score=32 means 5 concepts matched)
+     Output: ranked files (score=32 means 5 concepts matched, very relevant)
      
   3. semantic_map(file) — Get file skeleton (10x cheaper than reading)
      Shows: key concepts, connections, line numbers
@@ -116,7 +116,7 @@ def status() -> str:
 
 
 @mcp.tool()
-def locate(issue_text: str, max_results: int = 5) -> str:
+def locate(issue_text: str, max_results: int = 0) -> str:
     """
     Find relevant files from an issue, error, or task description.
     
@@ -134,7 +134,10 @@ def locate(issue_text: str, max_results: int = 5) -> str:
     
     Args:
         issue_text: Paste the error message, bug report, or task description
-        max_results: How many files to return (default 5)
+        max_results: How many files to return. Choose based on your needs:
+                     - For focused debugging: 3
+                     - For broad exploration: 10
+                     Default: all files with score > 1
     
     Returns:
         JSON with ranked files, matching concepts, and candidate line numbers
@@ -248,8 +251,14 @@ def locate(issue_text: str, max_results: int = 5) -> str:
     # Rank results
     ranked = sorted(file_scores.items(), key=lambda x: x[1]["score"], reverse=True)
     
+    # Filter: only files with score > 1 (at least 1 matching seed)
+    # max_results=0 means return all matching files
     results = []
-    for doc, info in ranked[:max_results]:
+    for doc, info in ranked:
+        if info["score"] <= 1:
+            continue  # No real match
+        if max_results > 0 and len(results) >= max_results:
+            break
         results.append({
             "file": doc,
             "score": info["score"],
@@ -389,7 +398,8 @@ def prove_path(source: str, target: str, max_hops: int = 5) -> str:
     Args:
         source: First concept (e.g., "user", "authentication")
         target: Second concept to check connection to
-        max_hops: How far to search (default 5)
+        max_hops: Search depth. Most real connections are within 3 hops.
+                  Use higher values only for exploring distant connections.
     """
     _ensure_initialized()
     
