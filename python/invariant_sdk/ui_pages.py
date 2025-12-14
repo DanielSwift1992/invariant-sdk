@@ -624,23 +624,118 @@ HTML_PAGE = '''<!DOCTYPE html>
                 <div class="hint">
                     Select a document to filter σ-edges. Hover <span style="color:var(--success);font-weight:600;">📄 σ</span> results to preview source context and open the file.
                 </div>
+
+                <!-- Mode Tabs -->
+                <div class="mode-tabs" style="display:flex;gap:8px;margin-bottom:16px;">
+                    <button class="mode-tab active" data-mode="search" onclick="setMode('search')">🔍 Explore</button>
+                    <button class="mode-tab" data-mode="verify" onclick="setMode('verify')">✓ Verify</button>
+                    <button class="mode-tab" data-mode="conflicts" onclick="setMode('conflicts')">⚠️ Conflicts</button>
+                </div>
+
+                <style>
+                    .mode-tab {
+                        background: var(--surface);
+                        border: 1px solid var(--border);
+                        color: var(--text-2);
+                        padding: 8px 16px;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        font-size: 13px;
+                    }
+                    .mode-tab:hover { border-color: var(--accent); }
+                    .mode-tab.active { 
+                        background: var(--accent-dim); 
+                        border-color: var(--accent); 
+                        color: var(--text); 
+                    }
+                    .mode-panel { display: none; }
+                    .mode-panel.active { display: block; }
+                    .legend {
+                        display: flex;
+                        gap: 16px;
+                        padding: 10px 14px;
+                        background: rgba(255,255,255,0.02);
+                        border-radius: 8px;
+                        border: 1px solid var(--border);
+                        font-size: 12px;
+                        margin-bottom: 16px;
+                    }
+                    .legend-item { display: flex; align-items: center; gap: 6px; }
+                    .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+                    .legend-dot.sigma { background: var(--success); }
+                    .legend-dot.alpha { background: var(--accent); }
+                    .legend-dot.lambda { background: var(--text-3); }
+                    .verify-form { display: flex; gap: 12px; margin-bottom: 20px; }
+                    .verify-input { 
+                        flex: 1; 
+                        padding: 12px 16px; 
+                        background: var(--surface);
+                        border: 1px solid var(--border);
+                        border-radius: 8px;
+                        color: var(--text);
+                        font-size: 14px;
+                    }
+                    .verify-input:focus { outline: none; border-color: var(--accent); }
+                    .conflict-item {
+                        padding: 12px 16px;
+                        background: rgba(239, 68, 68, 0.05);
+                        border: 1px solid rgba(239, 68, 68, 0.2);
+                        border-radius: 8px;
+                        margin-bottom: 8px;
+                    }
+                    .conflict-item .src { color: var(--text); font-weight: 500; }
+                    .conflict-item .docs { color: var(--text-3); font-size: 12px; margin-top: 4px; }
+                </style>
+
+                <!-- Legend -->
+                <div class="legend">
+                    <div class="legend-item"><span class="legend-dot sigma"></span> σ = From your documents (proven)</div>
+                    <div class="legend-item"><span class="legend-dot alpha"></span> α = Global knowledge (axiom)</div>
+                    <div class="legend-item"><span class="legend-dot lambda"></span> λ = Ghost edge (navigation)</div>
+                </div>
 		        
-		        <div class="search-form">
-	            <div class="search-wrapper">
-	                <input type="text" class="search-input" id="query" 
-	                       placeholder="Type to search... (suggestions will appear)" autofocus
-                       oninput="handleInput(this.value)" autocomplete="off">
-                <div class="autocomplete" id="autocomplete"></div>
-            </div>
-            <button class="btn" id="searchBtn" onclick="search()">Search</button>
-        </div>
+		        <!-- Mode: Search -->
+                <div class="mode-panel active" id="panel-search">
+		            <div class="search-form">
+	                    <div class="search-wrapper">
+	                        <input type="text" class="search-input" id="query" 
+	                               placeholder="Type to search... (suggestions will appear)" autofocus
+                               oninput="handleInput(this.value)" autocomplete="off">
+                        <div class="autocomplete" id="autocomplete"></div>
+                    </div>
+                    <button class="btn" id="searchBtn" onclick="search()">Search</button>
+                </div>
         
-        <div id="content">
-            <div class="empty">
-                <h3>Enter a word to explore</h3>
-                <p>See semantic connections from your documents + global knowledge</p>
-            </div>
-        </div>
+                <div id="content">
+                    <div class="empty">
+                        <h3>Enter a word to explore</h3>
+                        <p>See semantic connections from your documents + global knowledge</p>
+                    </div>
+                </div>
+                </div>
+
+                <!-- Mode: Verify -->
+                <div class="mode-panel" id="panel-verify">
+                    <div class="verify-form">
+                        <input type="text" class="verify-input" id="verifySource" placeholder="Source concept (e.g. user)">
+                        <span style="color:var(--text-3);align-self:center;">→</span>
+                        <input type="text" class="verify-input" id="verifyTarget" placeholder="Target concept (e.g. database)">
+                        <button class="btn" onclick="verifyPath()">Verify</button>
+                    </div>
+                    <div id="verifyResult">
+                        <div class="empty">
+                            <h3>Check if concepts are connected</h3>
+                            <p>Enter source and target to find σ-proof</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mode: Conflicts -->
+                <div class="mode-panel" id="panel-conflicts">
+                    <div id="conflictsList">
+                        <div class="loading"><span class="spinner"></span>Loading conflicts...</div>
+                    </div>
+                </div>
         
         <div class="doc-section">
             <h3>ADD DOCUMENT</h3>
@@ -653,6 +748,7 @@ HTML_PAGE = '''<!DOCTYPE html>
             </div>
         </div>
     </div>
+
     
 		    <script>
 	        const queryInput = document.getElementById('query');
@@ -669,6 +765,91 @@ HTML_PAGE = '''<!DOCTYPE html>
             let miniLabels = true;
 	        
 	        let debounceTimer;
+            let currentMode = 'search';
+
+            // Mode switching
+            function setMode(mode) {
+                currentMode = mode;
+                document.querySelectorAll('.mode-tab').forEach(tab => {
+                    tab.classList.toggle('active', tab.dataset.mode === mode);
+                });
+                document.querySelectorAll('.mode-panel').forEach(panel => {
+                    panel.classList.toggle('active', panel.id === 'panel-' + mode);
+                });
+                if (mode === 'conflicts') loadConflicts();
+            }
+
+            // Verify path
+            async function verifyPath() {
+                const src = document.getElementById('verifySource').value.trim();
+                const tgt = document.getElementById('verifyTarget').value.trim();
+                const resultDiv = document.getElementById('verifyResult');
+                if (!src || !tgt) {
+                    resultDiv.innerHTML = '<div class="empty"><h3>Enter both concepts</h3></div>';
+                    return;
+                }
+                resultDiv.innerHTML = '<div class="loading"><span class="spinner"></span>Checking connection...</div>';
+                try {
+                    const res = await fetch('/api/verify?src=' + encodeURIComponent(src) + '&tgt=' + encodeURIComponent(tgt));
+                    const data = await res.json();
+                    if (data.exists) {
+                        const pathStr = (data.path || []).join(' → ');
+                        resultDiv.innerHTML = `
+                            <div class="results" style="background:rgba(34,197,94,0.05);border-color:rgba(34,197,94,0.2);">
+                                <h3 style="color:var(--success);">✓ Connection Proven</h3>
+                                <p style="margin:12px 0;font-size:14px;"><strong>Path:</strong> ${escHtml(pathStr)}</p>
+                                <p style="color:var(--text-3);font-size:12px;">
+                                    Ring: ${data.ring || 'σ'} • 
+                                    ${data.provenance ? 'Source: ' + escHtml(data.provenance) : 'From overlay'}
+                                </p>
+                            </div>
+                        `;
+                    } else {
+                        resultDiv.innerHTML = `
+                            <div class="results" style="background:rgba(239,68,68,0.05);border-color:rgba(239,68,68,0.2);">
+                                <h3 style="color:var(--danger);">✗ No Path Found</h3>
+                                <p style="margin-top:8px;color:var(--text-2);">"${escHtml(src)}" is not connected to "${escHtml(tgt)}" in your documents.</p>
+                            </div>
+                        `;
+                    }
+                } catch (e) {
+                    resultDiv.innerHTML = '<div class="empty"><h3>Error</h3><p>' + escHtml(e.message) + '</p></div>';
+                }
+            }
+
+            // Load conflicts
+            async function loadConflicts() {
+                const listDiv = document.getElementById('conflictsList');
+                try {
+                    const res = await fetch('/api/conflicts');
+                    const data = await res.json();
+                    const conflicts = data.conflicts || [];
+                    if (conflicts.length === 0) {
+                        listDiv.innerHTML = '<div class="empty"><h3>No Conflicts</h3><p>All facts are consistent</p></div>';
+                        return;
+                    }
+                    let html = '<p style="margin-bottom:16px;color:var(--warning);font-weight:500;">⚠️ ' + conflicts.length + ' conflicts detected</p>';
+                    conflicts.slice(0, 30).forEach(c => {
+                        html += `
+                            <div class="conflict-item">
+                                <div class="src">→ ${escHtml(c.target || 'unknown')}</div>
+                                <div class="docs">
+                                    ${escHtml(c.old?.doc || '?')}:${c.old?.line || '?'} 
+                                    vs 
+                                    ${escHtml(c.new?.doc || '?')}:${c.new?.line || '?'}
+                                </div>
+                            </div>
+                        `;
+                    });
+                    if (conflicts.length > 30) {
+                        html += '<p style="color:var(--text-3);font-size:12px;">...and ' + (conflicts.length - 30) + ' more</p>';
+                    }
+                    listDiv.innerHTML = html;
+                } catch (e) {
+                    listDiv.innerHTML = '<div class="empty"><h3>Error loading conflicts</h3></div>';
+                }
+            }
+
 
             function escHtml(s) {
                 return String(s)

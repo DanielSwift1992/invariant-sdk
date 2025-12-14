@@ -97,6 +97,8 @@ class UIHandler(BaseHTTPRequestHandler):
             self.api_context(parsed.query)
         elif parsed.path == '/api/open':
             self.api_open(parsed.query)
+        elif parsed.path == '/api/conflicts':
+            self.api_conflicts()
         else:
             self.send_error(404)
     
@@ -1260,6 +1262,31 @@ class UIHandler(BaseHTTPRequestHandler):
         
         out.sort(key=lambda x: (-x['edges'], x['doc'].lower()))
         self.send_json({'docs': out})
+    
+    def api_conflicts(self):
+        """Return detected conflicts from overlay."""
+        overlay = UIHandler.overlay
+        if not overlay:
+            self.send_json({'conflicts': [], 'total': 0})
+            return
+        
+        conflicts = []
+        for old_edge, new_edge in overlay.conflicts:
+            conflicts.append({
+                'target': overlay.get_label(old_edge.tgt) or old_edge.tgt[:8],
+                'old': {
+                    'doc': old_edge.doc,
+                    'line': old_edge.line,
+                    'weight': old_edge.weight,
+                },
+                'new': {
+                    'doc': new_edge.doc,
+                    'line': new_edge.line,
+                    'weight': new_edge.weight,
+                },
+            })
+        
+        self.send_json({'conflicts': conflicts, 'total': len(conflicts)})
     
     def api_verify(self, query_string: str):
         """Verify if an assertion has σ-proof (documentary evidence)."""
