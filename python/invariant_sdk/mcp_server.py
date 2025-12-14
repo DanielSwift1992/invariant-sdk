@@ -791,12 +791,10 @@ def ingest(file_path: str) -> str:
         if not files:
             return json.dumps({"error": f"No text files found in {file_path}"})
     
-    
-    # Process all files
-    total_files = len(files)
-    total_edges = 0
-    total_anchors_found = 0
-    files_processed = 0
+    # OPTIMIZATION: Mega-batch all words from all files (Theory: MDL - 1 request < N requests)
+    # Step 1: Collect all unique words from ALL files first
+    all_words_set = set()
+    file_words_map = {}  # file_path -> list of unique words
     
     for file_path_obj in files:
         try:
@@ -804,12 +802,15 @@ def ingest(file_path: str) -> str:
         except Exception:
             continue
         
-        # Tokenize with positions
+        # Tokenize
         tokens = []
         lines = text.split('\n')
         for line_num, line_text in enumerate(lines, 1):
             for match in re.finditer(r'\b[a-zA-Z]{3,}\b', line_text):
                 tokens.append((match.group().lower(), line_num))
+        
+        if len(tokens) < 2:
+            continue
         
         words = [w for w, _ in tokens]
         unique_words = list(dict.fromkeys(words))[:500]
@@ -817,15 +818,33 @@ def ingest(file_path: str) -> str:
         if len(unique_words) < 2:
             continue
         
-        # Find anchors via crystal
-        word_to_hash = {w: hash8_hex(f"Ġ{w}") for w in unique_words}
-        
-        try:
-            batch_results = _physics._client.get_halo_pages(word_to_hash.values(), limit=0)
-        except Exception:
-            continue
-        
-        mean_mass = _physics.mean_mass
+        file_words_map[file_path_obj] = (tokens, unique_words)
+        all_words_set.update(unique_words)
+    
+    if not all_words_set:
+        return json.dumps({"error": "No words found in any files"})
+    
+    # Step 2: ONE mega-batch request for ALL words
+    all_words_list = list(all_words_set)
+    word_to_hash = {w: hash8_hex(f"Ġ{w}") for w in all_words_list}
+    
+    try:
+        # SINGLE HTTP REQUEST for all words from all files
+        batch_results = _physics._client.get_halo_pages(word_to_hash.values(), limit=0)
+    except Exception as e:
+        return json.dumps({"error": f"Crystal server error: {e}"})
+    
+    mean_mass = _physics.mean_mass
+    
+    # Step 3: Process each file using cached batch_results
+    total_files = len(file_words_map)
+    total_edges = 0
+    total_anchors_found = 0
+    files_processed = 0
+    files_details = []  # Track progress for each file
+    
+    for file_path_obj, (tokens, unique_words) in file_words_map.items():
+        # Use cached batch_results (no new HTTP request)
         candidates = []
         for word in unique_words:
             h8 = word_to_hash.get(word)
@@ -896,6 +915,15 @@ def ingest(file_path: str) -> str:
         total_edges += edges_added
         total_anchors_found += len(anchor_words)
         files_processed += 1
+        
+        # Track first 10 files for progress visibility
+        if len(files_details) < 10:
+            files_details.append({
+                "file": doc_name,
+                "edges": edges_added,
+                "anchors": len(anchor_words)
+            })
+    
     
     # Save overlay
     _overlay_path.parent.mkdir(parents=True, exist_ok=True)
@@ -908,6 +936,9 @@ def ingest(file_path: str) -> str:
         "files_processed": files_processed,
         "total_edges": total_edges,
         "total_anchors": total_anchors_found,
+        "unique_words_processed": len(all_words_set),
+        "http_requests": 1,  # Mega-batch optimization
+        "files_sample": files_details,  # First 10 files
         "overlay_path": str(_overlay_path),
     }, indent=2)
 
