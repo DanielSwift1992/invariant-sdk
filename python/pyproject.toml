@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "invarianthub"
-version = "1.1.4"
+version = "1.1.5"
 description = "Deterministic Knowledge Engine - Semantic Kernel for LLM Agents"
 readme = "README.md"
 license = {text = "MIT"}
@@ -16,7 +16,6 @@ dependencies = [
 
 [project.optional-dependencies]
 embeddings = ["sentence-transformers>=2.2.0"]
-mcp = ["mcp @ git+https://github.com/modelcontextprotocol/python-sdk.git@65b36de4eb930a471a5eeeddf078dc8b240a90f2"]
 dev = ["pytest", "maturin"]
 
 [project.scripts]
