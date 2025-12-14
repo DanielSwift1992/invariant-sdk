@@ -790,7 +790,8 @@ class UIHandler(BaseHTTPRequestHandler):
                 h8 = n.get('hash8', '')
                 weight = n.get('weight', 0)
                 doc = n.get('doc')
-                is_local = (n.get('source') == 'local') or (doc is not None)
+                ring = n.get('ring')
+                is_local = (ring is not None) or (n.get('source') == 'local') or (doc is not None)
                 line = n.get('line') if is_local else None
                 ctx_hash = n.get('ctx_hash') if is_local else None
                 
@@ -799,6 +800,8 @@ class UIHandler(BaseHTTPRequestHandler):
                 
                 # Get human-readable label: LOCAL overlay first, then global server
                 source = 'local' if is_local else 'global'
+                ring_val = (ring or 'sigma') if is_local else 'alpha'
+                phase_val = n.get('phase') if is_local else None
                 label = overlay.get_label(h8) if (is_local and overlay) else None
                 
                 # Fallback: use global server label
@@ -814,8 +817,11 @@ class UIHandler(BaseHTTPRequestHandler):
                     'label': label,
                     'weight': weight,
                     'source': source,
-                    'doc': doc
+                    'doc': doc,
+                    'ring': ring_val,
                 }
+                if phase_val:
+                    neighbor_data['phase'] = phase_val
                 # Include provenance if available
                 if line is not None:
                     neighbor_data['line'] = line
@@ -1319,7 +1325,64 @@ class UIHandler(BaseHTTPRequestHandler):
         
         try:
             result = physics.verify(subject, obj)
-            
+
+            # Enrich: resolve labels for the whole path (human UI, no hashes)
+            path_targets: list[str] = []
+            for edge in result.path or []:
+                h8 = edge.get("hash8") if isinstance(edge, dict) else None
+                if h8:
+                    path_targets.append(str(h8))
+
+            hashes: list[str] = []
+            if result.subject_hash:
+                hashes.append(result.subject_hash)
+            hashes.extend(path_targets)
+            if result.object_hash:
+                hashes.append(result.object_hash)
+
+            # de-dupe (stable)
+            seen = set()
+            hashes = [h for h in hashes if h and not (h in seen or seen.add(h))]
+
+            labels: dict[str, str] = {}
+            if hashes:
+                try:
+                    labels.update(physics._client.get_labels_batch(hashes))
+                except Exception:
+                    pass
+            if overlay and hashes:
+                for h in hashes:
+                    lbl = overlay.get_label(h)
+                    if lbl:
+                        labels[h] = lbl
+
+            def _lbl(h: str) -> str:
+                if not h:
+                    return ""
+                return labels.get(h) or (h[:8] + "…")
+
+            steps: list[dict] = []
+            cur = result.subject_hash
+            for edge in result.path or []:
+                if not isinstance(edge, dict):
+                    continue
+                tgt = str(edge.get("hash8") or "")
+                if not tgt:
+                    continue
+                steps.append({
+                    "src": cur,
+                    "src_label": _lbl(cur),
+                    "tgt": tgt,
+                    "tgt_label": _lbl(tgt),
+                    "weight": edge.get("weight"),
+                    "ring": edge.get("ring"),
+                    "phase": edge.get("phase"),
+                    "doc": edge.get("doc"),
+                    "line": edge.get("line"),
+                    "ctx_hash": edge.get("ctx_hash"),
+                })
+                cur = tgt
+
             self.send_json({
                 'proven': result.proven,
                 'message': result.message,
@@ -1327,7 +1390,11 @@ class UIHandler(BaseHTTPRequestHandler):
                 'object': obj,
                 'subject_hash': result.subject_hash,
                 'object_hash': result.object_hash,
+                'subject_label': _lbl(result.subject_hash),
+                'object_label': _lbl(result.object_hash),
                 'path': result.path,
+                'steps': steps,
+                'labels': labels,
                 'sources': result.sources,
                 'conflicts': result.conflicts
             })
@@ -1757,32 +1824,35 @@ def run_ui(port: int = 8080, server: str = DEFAULT_SERVER, overlay_path: Optiona
     except:
         pass
     
-    # Connect
+    # Connect (load overlay consistently for physics + UI)
+    overlays = []
+    if overlay_path:
+        overlays = [overlay_path]
+    else:
+        overlays = find_overlays()
+        if overlays:
+            UIHandler.overlay_path = overlays[-1]
+
     print(f"Connecting to: {server}")
     try:
-        physics = HaloPhysics(server, auto_discover_overlay=True)
+        physics = HaloPhysics(
+            server,
+            overlay=overlay_path,
+            auto_discover_overlay=(overlay_path is None),
+        )
         UIHandler.physics = physics
         print(f"  Crystal: {physics.crystal_id}")
     except Exception as e:
         print(f"  Error: {e}")
         return
-    
-    # Load overlay
+
+    # UI overlay must match physics overlay (Invariant V: no split-brain state)
+    UIHandler.overlay = physics.overlay
     if overlay_path:
-        overlay = OverlayGraph.load(overlay_path)
         UIHandler.overlay_path = overlay_path
-    elif physics._overlay:
-        overlay = physics._overlay
-    else:
-        overlays = find_overlays()
-        overlay = OverlayGraph.load_cascade(overlays) if overlays else None
-        if overlays:
-            UIHandler.overlay_path = overlays[-1]
-    
-    UIHandler.overlay = overlay
-    
-    if overlay:
-        print(f"  Local: {overlay.n_edges} edges, {len(overlay.labels)} labels")
+
+    if physics.overlay:
+        print(f"  Local: {physics.overlay.n_edges} edges, {len(physics.overlay.labels)} labels")
     
     print()
     print(f"→ Open http://localhost:{port}")

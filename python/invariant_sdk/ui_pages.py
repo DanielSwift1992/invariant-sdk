@@ -160,82 +160,172 @@ HTML_PAGE = '''<!DOCTYPE html>
 	            margin-bottom: 32px;
 	        }
 
-            .hint {
-                color: var(--text-3);
-                font-size: 12px;
-                margin: 8px 0 18px;
+	        .hint {
+	            color: var(--text-3);
+	            font-size: 12px;
+	            margin: 8px 0 18px;
+	        }
+
+            .layout {
+                display: grid;
+                grid-template-columns: 320px 1fr;
+                gap: 16px;
+                align-items: start;
             }
 
-        .toolbar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            gap: 12px;
-            margin-bottom: 14px;
-        }
+            .sidebar {
+                position: sticky;
+                top: 92px;
+                height: calc(100vh - 120px);
+                overflow: auto;
+                padding: 12px 12px 14px;
+                border: 1px solid var(--border);
+                border-radius: 14px;
+                background: rgba(17, 17, 19, 0.78);
+                box-shadow: 0 14px 40px rgba(0,0,0,0.35);
+            }
 
-        .toolbar-left {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            flex-wrap: wrap;
-        }
+            .sidebar-header {
+                display: flex;
+                justify-content: space-between;
+                align-items: flex-start;
+                gap: 12px;
+                margin-bottom: 10px;
+            }
 
-        .toolbar-label {
-            font-size: 12px;
-            color: var(--text-3);
-        }
+            .sidebar-title {
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.12em;
+                text-transform: uppercase;
+                color: var(--text-3);
+            }
 
-        .doc-picker {
-            margin-bottom: 18px;
-        }
+            .sidebar-selected {
+                margin-top: 6px;
+                color: var(--text-2);
+                font-size: 12px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                max-width: 240px;
+            }
 
-        .doc-list {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-            gap: 10px;
-            max-height: 240px;
-            overflow: auto;
-            padding-right: 6px;
-        }
+            .sidebar-actions {
+                display: flex;
+                gap: 8px;
+                flex-wrap: wrap;
+                justify-content: flex-end;
+            }
 
-        .doc-item {
-            text-align: left;
-            padding: 10px 12px;
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            color: var(--text);
-            cursor: pointer;
-        }
-        
-        .doc-item:hover { border-color: rgba(59, 130, 246, 0.6); background: rgba(59, 130, 246, 0.06); }
+            .file-filter {
+                margin: 10px 0 10px;
+            }
 
-        .doc-item.active {
-            border-color: var(--accent);
-            box-shadow: 0 0 0 1px rgba(59,130,246,0.25) inset;
-        }
+            .file-filter input {
+                width: 100%;
+                padding: 10px 12px;
+                font-size: 13px;
+                background: rgba(255,255,255,0.02);
+                border: 1px solid var(--border);
+                border-radius: 10px;
+                color: var(--text);
+            }
 
-        .doc-item .name { font-weight: 600; font-size: 13px; }
-        .doc-item .meta { color: var(--text-3); font-size: 11px; margin-top: 4px; font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+            .file-filter input:focus {
+                outline: none;
+                border-color: rgba(59,130,246,0.7);
+                box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+            }
 
-        .doc-empty {
-            grid-column: 1 / -1;
-            color: var(--text-2);
-            font-size: 12px;
-            padding: 10px 12px;
-            border: 1px dashed var(--border-2);
-            border-radius: 10px;
-            background: rgba(255,255,255,0.03);
-        }
+            .file-tree {
+                display: flex;
+                flex-direction: column;
+                gap: 4px;
+                padding-right: 6px;
+                max-height: 44vh;
+                overflow: auto;
+            }
 
-        .doc-link {
-            font-size: 12px;
-            color: var(--accent);
-            text-decoration: none;
-        }
+            .tree-folder { margin-top: 4px; }
 
-	        .doc-link:hover { text-decoration: underline; }
+            .tree-children {
+                display: none;
+                margin-left: 10px;
+                padding-left: 10px;
+                border-left: 1px solid rgba(255,255,255,0.06);
+            }
+
+            .tree-folder.open > .tree-children { display: block; }
+
+            .tree-row {
+                width: 100%;
+                text-align: left;
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 8px 10px;
+                border-radius: 10px;
+                border: 1px solid transparent;
+                background: rgba(255,255,255,0.02);
+                color: var(--text);
+                cursor: pointer;
+            }
+
+            .tree-row:hover {
+                background: rgba(255,255,255,0.03);
+                border-color: var(--border);
+            }
+
+            .tree-row.active {
+                background: var(--accent-dim);
+                border-color: rgba(59,130,246,0.35);
+            }
+
+            .tree-row .chev {
+                width: 14px;
+                color: var(--text-3);
+                opacity: 0.9;
+                transition: transform 120ms ease;
+                flex-shrink: 0;
+            }
+
+            .tree-folder.open > .tree-row .chev { transform: rotate(90deg); }
+
+            .tree-row .label {
+                flex: 1;
+                font-size: 13px;
+                font-weight: 500;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .tree-row .meta {
+                font-size: 11px;
+                color: var(--text-3);
+                font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                flex-shrink: 0;
+            }
+
+            .tree-empty {
+                color: var(--text-2);
+                font-size: 12px;
+                padding: 10px 12px;
+                border: 1px dashed var(--border-2);
+                border-radius: 10px;
+                background: rgba(255,255,255,0.03);
+            }
+
+            .main {
+                min-width: 0;
+            }
+
+            @media (max-width: 980px) {
+                .layout { grid-template-columns: 1fr; }
+                .sidebar { position: relative; top: auto; height: auto; max-height: none; }
+                .file-tree { max-height: 260px; }
+            }
 
 	        .doc-action {
 	            background: rgba(255,255,255,0.03);
@@ -496,9 +586,10 @@ HTML_PAGE = '''<!DOCTYPE html>
             border-color: var(--border);
         }
         
-        .result-item.local {
-            border-left: 3px solid var(--success);
-        }
+        .result-item.ring-sigma { border-left: 3px solid var(--success); }
+        .result-item.ring-alpha { border-left: 3px solid rgba(59, 130, 246, 0.55); }
+        .result-item.ring-lambda { border-left: 3px solid rgba(255, 255, 255, 0.18); }
+        .result-item.ring-eta { border-left: 3px solid rgba(239, 68, 68, 0.8); }
         
         .result-word {
             font-weight: 500;
@@ -518,15 +609,10 @@ HTML_PAGE = '''<!DOCTYPE html>
             font-weight: 600;
         }
         
-        .badge-local {
-            background: rgba(34, 197, 94, 0.15);
-            color: var(--success);
-        }
-        
-        .badge-global {
-            background: var(--accent-dim);
-            color: var(--accent);
-        }
+        .badge-sigma { background: rgba(34, 197, 94, 0.15); color: var(--success); }
+        .badge-alpha { background: var(--accent-dim); color: var(--accent); }
+        .badge-lambda { background: rgba(255,255,255,0.06); color: var(--text-2); }
+        .badge-eta { background: rgba(239, 68, 68, 0.12); color: rgba(239, 68, 68, 0.95); }
         
         .orbit-group {
             margin-top: 20px;
@@ -545,24 +631,27 @@ HTML_PAGE = '''<!DOCTYPE html>
         }
         
         .doc-section {
-            margin-top: 40px;
-            padding-top: 24px;
-            border-top: 1px solid var(--border);
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid rgba(255,255,255,0.06);
         }
         
         .doc-section h3 {
-            font-size: 14px;
-            color: var(--text-2);
-            margin-bottom: 16px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--text-3);
+            margin-bottom: 12px;
         }
         
         .doc-upload {
             border: 1px dashed var(--border-2);
-            border-radius: 8px;
-            padding: 40px;
+            border-radius: 12px;
+            padding: 18px 14px;
             text-align: center;
             cursor: pointer;
-            transition: border-color 0.2s;
+            transition: all 0.15s;
             background: rgba(255,255,255,0.02);
         }
         
@@ -579,6 +668,83 @@ HTML_PAGE = '''<!DOCTYPE html>
         .doc-upload input {
             display: none;
         }
+
+        /* Tabs + legend */
+        .mode-tabs {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            margin: 4px 0 16px;
+        }
+
+        .mode-tab {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text-2);
+            padding: 8px 16px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 13px;
+        }
+
+        .mode-tab:hover { border-color: rgba(59, 130, 246, 0.65); }
+
+        .mode-tab.active {
+            background: var(--accent-dim);
+            border-color: rgba(59, 130, 246, 0.65);
+            color: var(--text);
+        }
+
+        .mode-panel { display: none; }
+        .mode-panel.active { display: block; }
+
+        .legend {
+            display: flex;
+            gap: 16px;
+            flex-wrap: wrap;
+            padding: 10px 14px;
+            background: rgba(255,255,255,0.02);
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            font-size: 12px;
+            margin-bottom: 16px;
+        }
+
+        .legend-item { display: flex; align-items: center; gap: 6px; }
+        .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
+        .legend-dot.sigma { background: var(--success); }
+        .legend-dot.alpha { background: var(--accent); }
+        .legend-dot.lambda { background: rgba(255,255,255,0.24); }
+        .legend-dot.eta { background: rgba(239,68,68,0.75); }
+
+        .verify-form { display: flex; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+        .verify-input {
+            flex: 1;
+            min-width: 220px;
+            padding: 12px 16px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--text);
+            font-size: 14px;
+        }
+
+        .verify-input:focus {
+            outline: none;
+            border-color: rgba(59,130,246,0.7);
+            box-shadow: 0 0 0 3px rgba(59,130,246,0.15);
+        }
+
+        .conflict-item {
+            padding: 12px 16px;
+            background: rgba(239, 68, 68, 0.05);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+            border-radius: 12px;
+            margin-bottom: 12px;
+        }
+
+        .conflict-item .src { color: var(--text); font-weight: 600; }
+        .conflict-item .docs { color: var(--text-3); font-size: 12px; margin-top: 4px; }
         
             @media (max-width: 820px) {
                 .nav-meta { display: none; }
@@ -607,91 +773,60 @@ HTML_PAGE = '''<!DOCTYPE html>
             </div>
         </nav>
 		    <div class="container">
-		        <p class="subtitle" style="margin-top: 4px;">Semantic Knowledge Explorer</p>
-	        
-	        <div class="toolbar">
-		            <div class="toolbar-left">
-		                <span class="toolbar-label">Documents</span>
-		                <a id="docLink" class="doc-link" href="/doc">Open</a>
-		                <button id="reindexBtn" class="doc-action" type="button" disabled>Reindex</button>
-		            </div>
-		        </div>
+                <div class="layout">
+                    <aside class="sidebar">
+                        <div class="sidebar-header">
+                            <div style="min-width:0;">
+                                <div class="sidebar-title">Files</div>
+                                <div class="sidebar-selected" id="sidebarSelected">All documents</div>
+                            </div>
+                            <div class="sidebar-actions">
+                                <button id="openDocBtn" class="doc-action" type="button" disabled>Open</button>
+                                <button id="revealDocBtn" class="doc-action" type="button" disabled>Reveal</button>
+                                <button id="vscodeDocBtn" class="doc-action" type="button" disabled>VS Code</button>
+                                <button id="reindexBtn" class="doc-action" type="button" disabled>Reindex</button>
+                            </div>
+                        </div>
 
-	            <div class="doc-picker">
-	                <div id="docList" class="doc-list"></div>
-	            </div>
+                        <div class="file-filter">
+                            <input id="docFilter" type="text" placeholder="Filter files…" autocomplete="off">
+                        </div>
 
-                <div class="hint">
-                    Select a document to filter σ-edges. Hover <span style="color:var(--success);font-weight:600;">📄 σ</span> results to preview source context and open the file.
-                </div>
+                        <div id="docTree" class="file-tree">
+                            <div class="tree-empty">Loading…</div>
+                        </div>
+
+                        <div class="doc-section">
+                            <h3>Add document</h3>
+                            <div class="doc-upload" id="dropZone">
+                                <input type="file" id="fileInput" accept=".txt,.md" onchange="uploadFile(this)">
+                                <p>📄 Drag file here or click to upload</p>
+                                <p style="font-size: 12px; color: var(--text-3); margin-top: 8px;">
+                                    Supports .txt and .md files (up to 500 unique words will be indexed)
+                                </p>
+                            </div>
+                        </div>
+                    </aside>
+
+                    <main class="main">
+		                <p class="subtitle" style="margin-top: 4px;">Semantic Knowledge Explorer</p>
+                        <div class="hint">
+                            Select a document to filter σ-edges. Hover <span style="color:var(--success);font-weight:600;">σ</span> results to preview source context and open the file.
+                        </div>
 
                 <!-- Mode Tabs -->
-                <div class="mode-tabs" style="display:flex;gap:8px;margin-bottom:16px;">
+                <div class="mode-tabs">
                     <button class="mode-tab active" data-mode="search" onclick="setMode('search')">Explore</button>
                     <button class="mode-tab" data-mode="verify" onclick="setMode('verify')">Verify</button>
                     <button class="mode-tab" data-mode="conflicts" onclick="setMode('conflicts')">Conflicts</button>
                 </div>
 
-                <style>
-                    .mode-tab {
-                        background: var(--surface);
-                        border: 1px solid var(--border);
-                        color: var(--text-2);
-                        padding: 8px 16px;
-                        border-radius: 8px;
-                        cursor: pointer;
-                        font-size: 13px;
-                    }
-                    .mode-tab:hover { border-color: var(--accent); }
-                    .mode-tab.active { 
-                        background: var(--accent-dim); 
-                        border-color: var(--accent); 
-                        color: var(--text); 
-                    }
-                    .mode-panel { display: none; }
-                    .mode-panel.active { display: block; }
-                    .legend {
-                        display: flex;
-                        gap: 16px;
-                        padding: 10px 14px;
-                        background: rgba(255,255,255,0.02);
-                        border-radius: 8px;
-                        border: 1px solid var(--border);
-                        font-size: 12px;
-                        margin-bottom: 16px;
-                    }
-                    .legend-item { display: flex; align-items: center; gap: 6px; }
-                    .legend-dot { width: 10px; height: 10px; border-radius: 50%; }
-                    .legend-dot.sigma { background: var(--success); }
-                    .legend-dot.alpha { background: var(--accent); }
-                    .legend-dot.lambda { background: var(--text-3); }
-                    .verify-form { display: flex; gap: 12px; margin-bottom: 20px; }
-                    .verify-input { 
-                        flex: 1; 
-                        padding: 12px 16px; 
-                        background: var(--surface);
-                        border: 1px solid var(--border);
-                        border-radius: 8px;
-                        color: var(--text);
-                        font-size: 14px;
-                    }
-                    .verify-input:focus { outline: none; border-color: var(--accent); }
-                    .conflict-item {
-                        padding: 12px 16px;
-                        background: rgba(239, 68, 68, 0.05);
-                        border: 1px solid rgba(239, 68, 68, 0.2);
-                        border-radius: 8px;
-                        margin-bottom: 8px;
-                    }
-                    .conflict-item .src { color: var(--text); font-weight: 500; }
-                    .conflict-item .docs { color: var(--text-3); font-size: 12px; margin-top: 4px; }
-                </style>
-
                 <!-- Legend -->
                 <div class="legend">
-                    <div class="legend-item"><span class="legend-dot sigma"></span> σ = From your documents (proven)</div>
-                    <div class="legend-item"><span class="legend-dot alpha"></span> α = Global knowledge (axiom)</div>
-                    <div class="legend-item"><span class="legend-dot lambda"></span> λ = Ghost edge (navigation)</div>
+                    <div class="legend-item"><span class="legend-dot sigma"></span> σ = observation (documents)</div>
+                    <div class="legend-item"><span class="legend-dot alpha"></span> α = context (crystal)</div>
+                    <div class="legend-item"><span class="legend-dot lambda"></span> λ = navigation (ghost)</div>
+                    <div class="legend-item"><span class="legend-dot eta"></span> η = hypothesis (unverified)</div>
                 </div>
 		        
 		        <!-- Mode: Search -->
@@ -736,30 +871,28 @@ HTML_PAGE = '''<!DOCTYPE html>
                         <div class="loading"><span class="spinner"></span>Loading conflicts...</div>
                     </div>
                 </div>
-        
-        <div class="doc-section">
-            <h3>ADD DOCUMENT</h3>
-            <div class="doc-upload" id="dropZone">
-                <input type="file" id="fileInput" accept=".txt,.md" onchange="uploadFile(this)">
-                <p>📄 Drag file here or click to upload</p>
-                <p style="font-size: 12px; color: var(--text-3); margin-top: 8px;">
-                    Supports .txt and .md files (up to 500 unique words will be indexed)
-                </p>
-            </div>
-        </div>
-    </div>
+                    </main>
+                </div>
+		    </div>
 
     
 		    <script>
 	        const queryInput = document.getElementById('query');
 	        const searchBtn = document.getElementById('searchBtn');
-	        const content = document.getElementById('content');
-		        const autocomplete = document.getElementById('autocomplete');
-		        const docList = document.getElementById('docList');
-		        const docLink = document.getElementById('docLink');
+		        const content = document.getElementById('content');
+			    const autocomplete = document.getElementById('autocomplete');
+
+                // Sidebar (IDE-like)
+                const docTree = document.getElementById('docTree');
+                const docFilter = document.getElementById('docFilter');
+                const sidebarSelected = document.getElementById('sidebarSelected');
+                const openDocBtn = document.getElementById('openDocBtn');
+                const revealDocBtn = document.getElementById('revealDocBtn');
+                const vscodeDocBtn = document.getElementById('vscodeDocBtn');
                 const reindexBtn = document.getElementById('reindexBtn');
-	            const dropZone = document.getElementById('dropZone');
-	            const fileInput = document.getElementById('fileInput');
+
+		        const dropZone = document.getElementById('dropZone');
+		        const fileInput = document.getElementById('fileInput');
 	        
 	        let selectedDoc = '';
             let miniLabels = true;
@@ -792,25 +925,113 @@ HTML_PAGE = '''<!DOCTYPE html>
                 try {
                     const res = await fetch('/api/verify?subject=' + encodeURIComponent(src) + '&object=' + encodeURIComponent(tgt));
                     const data = await res.json();
-                    if (data.proven) {
-                        const pathStr = (data.path || []).join(' → ');
-                        resultDiv.innerHTML = `
-                            <div class="results" style="background:rgba(34,197,94,0.05);border-color:rgba(34,197,94,0.2);">
-                                <h3 style="color:var(--success);">Connection Proven</h3>
-                                <p style="margin:12px 0;font-size:14px;"><strong>Path:</strong> ${escHtml(pathStr)}</p>
-                                <p style="color:var(--text-3);font-size:12px;">
-                                    ${data.sources?.length ? 'Sources: ' + data.sources.map(s => escHtml(s)).join(', ') : 'From overlay'}
-                                </p>
-                            </div>
-                        `;
-                    } else {
-                        resultDiv.innerHTML = `
-                            <div class="results" style="background:rgba(239,68,68,0.05);border-color:rgba(239,68,68,0.2);">
-                                <h3 style="color:var(--danger);">No Path Found</h3>
-                                <p style="margin-top:8px;color:var(--text-2);">"${escHtml(src)}" is not connected to "${escHtml(tgt)}" in your documents.</p>
-                            </div>
-                        `;
+                    if (data.error) {
+                        resultDiv.innerHTML = '<div class="empty"><h3>Error</h3><p>' + escHtml(data.error) + '</p></div>';
+                        return;
                     }
+
+                    const steps = Array.isArray(data.steps) ? data.steps : [];
+                    const sources = Array.isArray(data.sources) ? data.sources : [];
+                    const hasPath = steps.length > 0;
+                    const proven = !!data.proven;
+                    const status = proven ? 'proven' : (hasPath ? 'weak' : 'none');
+                    const title = status === 'proven'
+                        ? 'σ-proven'
+                        : status === 'weak'
+                            ? 'Path exists (not σ-proof)'
+                            : 'No path';
+                    const color = status === 'proven'
+                        ? 'var(--success)'
+                        : status === 'weak'
+                            ? 'var(--warning)'
+                            : 'var(--danger)';
+                    const bg = status === 'proven'
+                        ? 'rgba(34,197,94,0.05)'
+                        : status === 'weak'
+                            ? 'rgba(245,158,11,0.06)'
+                            : 'rgba(239,68,68,0.05)';
+                    const border = status === 'proven'
+                        ? 'rgba(34,197,94,0.2)'
+                        : status === 'weak'
+                            ? 'rgba(245,158,11,0.25)'
+                            : 'rgba(239,68,68,0.2)';
+
+                    let html = `
+                        <div class="results" style="background:${bg};border-color:${border};">
+                            <h3 style="color:${color};margin-bottom:10px;">${escHtml(title)}</h3>
+                            <div style="color:var(--text-2);font-size:13px;margin-bottom:10px;">
+                                ${escHtml(String(data.message || ''))}
+                            </div>
+                            <div style="display:flex;gap:12px;flex-wrap:wrap;color:var(--text-3);font-size:12px;font-family:'JetBrains Mono',ui-monospace;">
+                                <span>Subject: <span style="color:var(--text)">${escHtml(String(data.subject_label || src))}</span></span>
+                                <span>Object: <span style="color:var(--text)">${escHtml(String(data.object_label || tgt))}</span></span>
+                            </div>
+                    `;
+
+                    if (sources.length) {
+                        html += `<div style="margin-top:10px;color:var(--text-3);font-size:12px;">Sources: ${sources.map(s => escHtml(String(s))).join(', ')}</div>`;
+                    }
+
+                    function ringBadge(ring) {
+                        const r = String(ring || '');
+                        const label = r === 'sigma' ? 'σ' : r === 'lambda' ? 'λ' : r === 'eta' ? 'η' : 'α';
+                        const cls = r === 'sigma' ? 'badge-sigma' : r === 'lambda' ? 'badge-lambda' : r === 'eta' ? 'badge-eta' : 'badge-alpha';
+                        return `<span class="badge ${cls}" style="margin-right:8px;">${label}</span>`;
+                    }
+
+                    if (steps.length) {
+                        html += `<div style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">`;
+                        html += `<div style="color:var(--text-3);font-size:12px;margin-bottom:10px;">Path</div>`;
+                        steps.forEach((s, idx) => {
+                            const srcLabel = String(s.src_label || '');
+                            const tgtLabel = String(s.tgt_label || '');
+                            const ring = String(s.ring || '');
+                            const doc = s.doc ? String(s.doc) : '';
+                            const line = s.line ? String(s.line) : '';
+                            const ctxHash = s.ctx_hash ? String(s.ctx_hash) : '';
+                            const loc = (doc && line) ? (doc + ':' + line) : (doc || '');
+
+                            const openBtns = doc
+                                ? `
+                                    <button class="mini-btn" type="button" data-open="vscode" data-doc="${escHtml(doc)}" data-line="${escHtml(line || '1')}" data-ctx-hash="${escHtml(ctxHash)}">VS Code</button>
+                                    <button class="mini-btn" type="button" data-open="open" data-doc="${escHtml(doc)}" data-line="${escHtml(line || '1')}" data-ctx-hash="${escHtml(ctxHash)}">Open</button>
+                                `
+                                : '';
+
+                            html += `
+                                <div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:10px;background:rgba(255,255,255,0.02);margin-bottom:8px;">
+                                    <div style="width:24px;color:var(--text-3);font-family:'JetBrains Mono',ui-monospace;">${idx + 1}</div>
+                                    <div style="min-width:0;flex:1;">
+                                        <div style="display:flex;align-items:center;gap:10px;min-width:0;">
+                                            ${ringBadge(ring)}
+                                            <div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
+                                                ${escHtml(srcLabel)} <span style="color:var(--text-3);">→</span> ${escHtml(tgtLabel)}
+                                            </div>
+                                        </div>
+                                        ${loc ? `<div style="margin-top:4px;color:var(--text-3);font-size:11px;font-family:'JetBrains Mono',ui-monospace;">${escHtml(loc)}</div>` : ''}
+                                    </div>
+                                    <div style="display:flex;gap:8px;flex-shrink:0;">
+                                        ${openBtns}
+                                    </div>
+                                </div>
+                            `;
+                        });
+                        html += `</div>`;
+                    }
+
+                    html += `</div>`;
+                    resultDiv.innerHTML = html;
+
+                    resultDiv.querySelectorAll('button[data-open]').forEach(btn => {
+                        btn.onclick = async (e) => {
+                            e.stopPropagation();
+                            const mode = btn.dataset.open;
+                            const doc = btn.dataset.doc;
+                            const line = btn.dataset.line || '1';
+                            const ctxHash = btn.dataset.ctxHash || '';
+                            await openDoc(mode, doc, line, ctxHash);
+                        };
+                    });
                 } catch (e) {
                     resultDiv.innerHTML = '<div class="empty"><h3>Error</h3><p>' + escHtml(e.message) + '</p></div>';
                 }
@@ -824,18 +1045,45 @@ HTML_PAGE = '''<!DOCTYPE html>
                     const data = await res.json();
                     const conflicts = data.conflicts || [];
                     if (conflicts.length === 0) {
-                        listDiv.innerHTML = '<div class="empty"><h3>No Conflicts</h3><p>All facts are consistent</p></div>';
+                        listDiv.innerHTML = '<div class="empty"><h3>No Conflicts</h3><p>Overlay contains no conflicting σ-claims.</p></div>';
                         return;
                     }
-                    let html = '<p style="margin-bottom:16px;color:var(--warning);font-weight:500;">' + conflicts.length + ' conflicts detected</p>';
+                    let html = '<div style="margin-bottom:16px;color:var(--warning);font-weight:600;">' + conflicts.length + ' conflicts detected</div>';
                     conflicts.slice(0, 30).forEach(c => {
+                        const target = c && c.target ? String(c.target) : 'unknown';
+                        const oldE = c && c.old ? c.old : {};
+                        const newE = c && c.new ? c.new : {};
+                        const oldDoc = oldE.doc ? String(oldE.doc) : '?';
+                        const newDoc = newE.doc ? String(newE.doc) : '?';
+                        const oldLine = oldE.line != null ? String(oldE.line) : '?';
+                        const newLine = newE.line != null ? String(newE.line) : '?';
+                        const oldW = oldE.weight != null ? String(oldE.weight) : '';
+                        const newW = newE.weight != null ? String(newE.weight) : '';
+
                         html += `
                             <div class="conflict-item">
-                                <div class="src">→ ${escHtml(c.target || 'unknown')}</div>
-                                <div class="docs">
-                                    ${escHtml(c.old?.doc || '?')}:${c.old?.line || '?'} 
-                                    vs 
-                                    ${escHtml(c.new?.doc || '?')}:${c.new?.line || '?'}
+                                <div class="src">→ ${escHtml(target)}</div>
+                                <div class="docs" style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
+                                    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+                                        <div style="min-width:0;">
+                                            <div style="color:var(--text);font-family:'JetBrains Mono',ui-monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(oldDoc)}:${escHtml(oldLine)}</div>
+                                            ${oldW ? `<div style="color:var(--text-3);font-size:11px;">weight: ${escHtml(oldW)}</div>` : ''}
+                                        </div>
+                                        <div style="display:flex;gap:8px;flex-shrink:0;">
+                                            <button class="mini-btn" type="button" data-open="vscode" data-doc="${escHtml(oldDoc)}" data-line="${escHtml(oldLine)}">VS Code</button>
+                                            <button class="mini-btn" type="button" data-open="open" data-doc="${escHtml(oldDoc)}" data-line="${escHtml(oldLine)}">Open</button>
+                                        </div>
+                                    </div>
+                                    <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;">
+                                        <div style="min-width:0;">
+                                            <div style="color:var(--text);font-family:'JetBrains Mono',ui-monospace;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escHtml(newDoc)}:${escHtml(newLine)}</div>
+                                            ${newW ? `<div style="color:var(--text-3);font-size:11px;">weight: ${escHtml(newW)}</div>` : ''}
+                                        </div>
+                                        <div style="display:flex;gap:8px;flex-shrink:0;">
+                                            <button class="mini-btn" type="button" data-open="vscode" data-doc="${escHtml(newDoc)}" data-line="${escHtml(newLine)}">VS Code</button>
+                                            <button class="mini-btn" type="button" data-open="open" data-doc="${escHtml(newDoc)}" data-line="${escHtml(newLine)}">Open</button>
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         `;
@@ -844,6 +1092,16 @@ HTML_PAGE = '''<!DOCTYPE html>
                         html += '<p style="color:var(--text-3);font-size:12px;">...and ' + (conflicts.length - 30) + ' more</p>';
                     }
                     listDiv.innerHTML = html;
+
+                    listDiv.querySelectorAll('button[data-open]').forEach(btn => {
+                        btn.onclick = async (e) => {
+                            e.stopPropagation();
+                            const mode = btn.dataset.open;
+                            const doc = btn.dataset.doc;
+                            const line = btn.dataset.line || '1';
+                            await openDoc(mode, doc, line, '');
+                        };
+                    });
                 } catch (e) {
                     listDiv.innerHTML = '<div class="empty"><h3>Error loading conflicts</h3></div>';
                 }
@@ -914,21 +1172,50 @@ HTML_PAGE = '''<!DOCTYPE html>
                 });
             }
 
+            let docsCache = [];
+            let openFolders = new Set();
+
+            function loadOpenFolders() {
+                try {
+                    const raw = localStorage.getItem('inv_tree_open');
+                    if (!raw) return;
+                    const parsed = JSON.parse(raw);
+                    if (Array.isArray(parsed)) openFolders = new Set(parsed.map(String));
+                } catch (e) {}
+            }
+
+            function saveOpenFolders() {
+                try {
+                    localStorage.setItem('inv_tree_open', JSON.stringify(Array.from(openFolders)));
+                } catch (e) {}
+            }
+
 	        function setSelectedDoc(doc) {
-		            selectedDoc = (doc || '').trim();
-		            try { localStorage.setItem('inv_doc', selectedDoc); } catch (e) {}
-		            if (docLink) {
-		                docLink.href = selectedDoc ? ('/doc?doc=' + encodeURIComponent(selectedDoc)) : '/doc';
-		            }
-                    if (reindexBtn) {
-                        reindexBtn.disabled = !selectedDoc;
-                        reindexBtn.title = selectedDoc ? ('Reindex ' + selectedDoc + ' (adds provenance)') : 'Select a document to reindex';
-                    }
-                if (docList) {
-                    docList.querySelectorAll('.doc-item').forEach(el => {
-                        el.classList.toggle('active', safeDecode(el.dataset.doc || '') === selectedDoc);
+		        selectedDoc = (doc || '').trim();
+		        try { localStorage.setItem('inv_doc', selectedDoc); } catch (e) {}
+
+                if (sidebarSelected) {
+                    sidebarSelected.textContent = selectedDoc || 'All documents';
+                }
+
+                const enabled = !!selectedDoc;
+                if (openDocBtn) openDocBtn.disabled = !enabled;
+                if (revealDocBtn) revealDocBtn.disabled = !enabled;
+                if (vscodeDocBtn) vscodeDocBtn.disabled = !enabled;
+
+                if (reindexBtn) {
+                    reindexBtn.disabled = !enabled;
+                    reindexBtn.title = enabled
+                        ? ('Reindex ' + selectedDoc + ' (adds provenance)')
+                        : 'Select a document to reindex';
+                }
+
+                if (docTree) {
+                    docTree.querySelectorAll('.tree-row[data-doc]').forEach(el => {
+                        el.classList.toggle('active', String(el.dataset.doc || '') === selectedDoc);
                     });
                 }
+
                 try {
                     const url = new URL(window.location.href);
                     if (selectedDoc) url.searchParams.set('doc', selectedDoc);
@@ -937,47 +1224,116 @@ HTML_PAGE = '''<!DOCTYPE html>
                 } catch (e) {}
 	        }
 
+            function buildTree(docs) {
+                const root = { name: '', path: '', children: new Map(), files: [], edgesTotal: 0, docsTotal: 0 };
+                docs.forEach(d => {
+                    const full = String(d.doc || '').trim();
+                    if (!full) return;
+                    const edges = +d.edges || 0;
+                    root.edgesTotal += edges;
+                    root.docsTotal += 1;
+                    const parts = full.split('/').filter(Boolean);
+                    let node = root;
+                    for (let i = 0; i < parts.length - 1; i++) {
+                        const part = parts[i];
+                        const nextPath = node.path ? (node.path + '/' + part) : part;
+                        if (!node.children.has(part)) {
+                            node.children.set(part, { name: part, path: nextPath, children: new Map(), files: [], edgesTotal: 0, docsTotal: 0 });
+                        }
+                        node = node.children.get(part);
+                        node.edgesTotal += edges;
+                        node.docsTotal += 1;
+                    }
+                    node.files.push(d);
+                });
+                return root;
+            }
+
+            function renderTree(node, filterActive) {
+                const folders = Array.from(node.children.values()).sort((a, b) => a.name.localeCompare(b.name));
+                const files = node.files.slice().sort((a, b) => String(a.doc).localeCompare(String(b.doc)));
+                let html = '';
+
+                folders.forEach(folder => {
+                    const open = filterActive || openFolders.has(folder.path);
+                    const meta = folder.docsTotal ? (folder.docsTotal + ' • ' + folder.edgesTotal) : '';
+                    html += `
+                        <div class="tree-folder ${open ? 'open' : ''}" data-folder="${escHtml(folder.path)}">
+                            <button type="button" class="tree-row" data-kind="folder" data-path="${escHtml(folder.path)}">
+                                <span class="chev">›</span>
+                                <span class="label">${escHtml(folder.name)}</span>
+                                <span class="meta">${meta}</span>
+                            </button>
+                            <div class="tree-children">
+                                ${renderTree(folder, filterActive)}
+                            </div>
+                        </div>
+                    `;
+                });
+
+                files.forEach(d => {
+                    const full = String(d.doc || '').trim();
+                    const parts = full.split('/').filter(Boolean);
+                    const name = parts.length ? parts[parts.length - 1] : full;
+                    const edges = +d.edges || 0;
+                    const active = full === selectedDoc;
+                    html += `
+                        <button type="button" class="tree-row ${active ? 'active' : ''}" data-kind="file" data-doc="${escHtml(full)}" title="${escHtml(full)}">
+                            <span class="chev" style="opacity:0;">›</span>
+                            <span class="label">${escHtml(name)}</span>
+                            <span class="meta">${edges}</span>
+                        </button>
+                    `;
+                });
+
+                return html;
+            }
+
+            function renderDocTree() {
+                if (!docTree) return;
+                const filter = (docFilter ? docFilter.value : '').trim().toLowerCase();
+                const filterActive = !!filter;
+
+                const allDocs = docsCache.slice().sort((a, b) => String(a.doc).localeCompare(String(b.doc)));
+                const visibleDocs = filterActive
+                    ? allDocs.filter(d => String(d.doc || '').toLowerCase().includes(filter))
+                    : allDocs;
+
+	                const totalDocs = allDocs.length;
+	                const totalEdges = allDocs.reduce((s, d) => s + (+d.edges || 0), 0);
+                    const allMeta = (filterActive ? (visibleDocs.length + '/' + totalDocs) : String(totalDocs)) + ' docs • ' + totalEdges + ' edges';
+
+                let html = '';
+	                html += `
+	                    <button type="button" class="tree-row ${selectedDoc ? '' : 'active'}" data-kind="all" data-doc="">
+	                        <span class="chev" style="opacity:0;">›</span>
+	                        <span class="label">All documents</span>
+	                        <span class="meta">${escHtml(allMeta)}</span>
+	                    </button>
+	                `;
+
+                if (visibleDocs.length === 0) {
+                    html += `<div class="tree-empty">${filterActive ? 'No matches.' : 'No local documents yet — upload one below.'}</div>`;
+                    docTree.innerHTML = html;
+                    return;
+                }
+
+                const tree = buildTree(visibleDocs);
+                html += renderTree(tree, filterActive);
+                docTree.innerHTML = html;
+            }
+
 	        async function loadDocs() {
 	            try {
 	                const res = await fetch('/api/docs');
 	                const data = await res.json();
-	                const docs = (data.docs || []).slice();
-                    if (!docList) return;
-                    docs.sort((a, b) => (b.edges || 0) - (a.edges || 0) || String(a.doc).localeCompare(String(b.doc)));
-                    const totalEdges = docs.reduce((s, d) => s + (+d.edges || 0), 0);
-
-                    let html = '';
-                    html += `
-                        <button type="button" class="doc-item ${selectedDoc ? '' : 'active'}" data-doc="">
-                            <div class="name">All documents</div>
-                            <div class="meta">${docs.length} docs • ${totalEdges} edges</div>
-                        </button>
-                    `;
-
-                    if (docs.length === 0) {
-                        html += `<div class="doc-empty">No local documents yet — upload one below to build an overlay.</div>`;
-                        docList.innerHTML = html;
-                        setSelectedDoc(selectedDoc);
-                        return;
-                    }
-
-                    docs.forEach(d => {
-                        const name = String(d.doc || '');
-                        const key = encodeURIComponent(name);
-                        const edges = +d.edges || 0;
-                        const nodes = +d.nodes || 0;
-                        const active = name === selectedDoc ? ' active' : '';
-                        html += `
-                            <button type="button" class="doc-item${active}" data-doc="${key}">
-                                <div class="name">${escHtml(name)}</div>
-                                <div class="meta">${edges} edges • ${nodes} nodes</div>
-                            </button>
-                        `;
-                    });
-                    docList.innerHTML = html;
+	                docsCache = (data.docs || []).slice();
+                    renderDocTree();
                     setSelectedDoc(selectedDoc);
 	            } catch (e) {
-	                // ignore
+                    if (docTree) {
+                        docTree.innerHTML = '<div class="tree-empty">Could not load documents.</div>';
+                    }
 	            }
 	        }
         
@@ -1039,14 +1395,61 @@ HTML_PAGE = '''<!DOCTYPE html>
 	            }
 	        });
 
-            if (docList) {
-                docList.addEventListener('click', (e) => {
-                    const btn = e.target.closest('.doc-item');
-                    if (!btn) return;
-                    setSelectedDoc(safeDecode(btn.dataset.doc || ''));
-                    if (queryInput.value.trim()) search();
-                });
-            }
+                loadOpenFolders();
+
+                if (docFilter) {
+                    docFilter.addEventListener('input', () => {
+                        renderDocTree();
+                    });
+                }
+
+                if (docTree) {
+                    docTree.addEventListener('click', (e) => {
+                        const row = e.target.closest('.tree-row');
+                        if (!row) return;
+                        const kind = String(row.dataset.kind || '');
+
+                        if (kind === 'folder') {
+                            const folder = String(row.dataset.path || '');
+                            const wrapper = row.closest('.tree-folder');
+                            if (wrapper) wrapper.classList.toggle('open');
+                            if (folder) {
+                                if (openFolders.has(folder)) openFolders.delete(folder);
+                                else openFolders.add(folder);
+                                saveOpenFolders();
+                            }
+                            return;
+                        }
+
+                        const doc = String(row.dataset.doc || '');
+                        setSelectedDoc(doc);
+                        if (queryInput.value.trim()) search();
+                    });
+                }
+
+                if (openDocBtn) {
+                    openDocBtn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        if (!selectedDoc) return;
+                        openDoc('open', selectedDoc, 1, '');
+                    });
+                }
+
+                if (revealDocBtn) {
+                    revealDocBtn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        if (!selectedDoc) return;
+                        openDoc('reveal', selectedDoc, 1, '');
+                    });
+                }
+
+                if (vscodeDocBtn) {
+                    vscodeDocBtn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        if (!selectedDoc) return;
+                        openDoc('vscode', selectedDoc, 1, '');
+                    });
+                }
 
             function setMiniLabels(on) {
                 miniLabels = !!on;
@@ -1118,9 +1521,21 @@ HTML_PAGE = '''<!DOCTYPE html>
 	                return;
 	            }
 	            
-	            const localCount = data.neighbors.filter(n => n.source === 'local').length;
-	            const globalCount = data.neighbors.length - localCount;
-	            const focus = Array.isArray(data.atoms) && data.atoms.length ? data.atoms[0] : '';
+		            const localCount = data.neighbors.filter(n => n.source === 'local').length;
+		            const globalCount = data.neighbors.length - localCount;
+                    const ringCounts = { sigma: 0, lambda: 0, eta: 0, alpha: 0 };
+                    data.neighbors.forEach(n => {
+                        const r = String(n.ring || (n.source === 'local' ? 'sigma' : 'alpha'));
+                        if (ringCounts[r] == null) ringCounts[r] = 0;
+                        ringCounts[r] += 1;
+                    });
+                    const ringParts = [];
+                    if (ringCounts.sigma) ringParts.push('σ ' + ringCounts.sigma);
+                    if (ringCounts.lambda) ringParts.push('λ ' + ringCounts.lambda);
+                    if (ringCounts.eta) ringParts.push('η ' + ringCounts.eta);
+                    ringParts.push('α ' + ringCounts.alpha);
+                    const ringSummary = ringParts.join(' • ');
+		            const focus = Array.isArray(data.atoms) && data.atoms.length ? data.atoms[0] : '';
 	            
 	            let miniSrc = '/graph3d?embed=1';
 	            if (selectedDoc) miniSrc += '&doc=' + encodeURIComponent(selectedDoc);
@@ -1145,7 +1560,7 @@ HTML_PAGE = '''<!DOCTYPE html>
 	                            <span>Mode: ${data.mode}</span>
 	                            <span>Mass: ${(data.mass || 0).toFixed(2)}</span>
                                 <span>Doc: ${selectedDoc ? escHtml(selectedDoc) : 'all'}</span>
-	                            <span>${localCount} local, ${globalCount} global</span>
+	                            <span>${ringSummary}</span>
 	                        </div>
 	                    </div>
 	                    <div class="graph-preview">
@@ -1174,9 +1589,23 @@ HTML_PAGE = '''<!DOCTYPE html>
 	                    const labelText = escHtml(label);
                         const labelKey = encodeURIComponent(label);
 	                    const weight = (n.weight * 100).toFixed(0) + '%';
-	                    const badge = isLocal 
-	                        ? '<span class="badge badge-local" title="From local documents (σ-fact)">📄 σ</span>'
-	                        : '<span class="badge badge-global" title="From global crystal (α-context)">🌐 α</span>';
+                        const ring = String(n.ring || (isLocal ? 'sigma' : 'alpha'));
+                        const ringLabel =
+                            ring === 'sigma' ? 'σ' :
+                            ring === 'lambda' ? 'λ' :
+                            ring === 'eta' ? 'η' :
+                            'α';
+                        const ringTitle =
+                            ring === 'sigma' ? 'σ: documentary observation (can prove with provenance)' :
+                            ring === 'lambda' ? 'λ: derived/ghost edge (navigation, not proof)' :
+                            ring === 'eta' ? 'η: hypothesis (unverified)' :
+                            'α: global crystal context (not proof)';
+                        const badgeClass =
+                            ring === 'sigma' ? 'badge-sigma' :
+                            ring === 'lambda' ? 'badge-lambda' :
+                            ring === 'eta' ? 'badge-eta' :
+                            'badge-alpha';
+	                    const badge = `<span class="badge ${badgeClass}" title="${escHtml(ringTitle)}">${ringLabel}</span>`;
 	                    
 	                    // Build location info with line number
 	                    let locInfo = '';
@@ -1187,9 +1616,18 @@ HTML_PAGE = '''<!DOCTYPE html>
 	                        }
 	                    }
 	                    
-	                    let tooltip = isLocal
-                            ? ((n.doc && n.line) ? 'Hover for context' : 'σ-edge (no provenance yet)')
-                            : 'α-context from global crystal';
+	                    let tooltip = 'α-context from global crystal';
+                        if (isLocal) {
+                            if (ring === 'sigma') {
+                                tooltip = (n.doc && n.line) ? 'σ-edge — hover for context' : 'σ-edge (no provenance yet)';
+                            } else if (ring === 'lambda') {
+                                tooltip = (n.doc && n.line) ? 'λ-edge (navigation) — hover for context' : 'λ-edge (navigation, no provenance)';
+                            } else if (ring === 'eta') {
+                                tooltip = 'η (hypothesis)';
+                            } else {
+                                tooltip = 'Local edge';
+                            }
+                        }
 	                    
 	                    // Add data attributes for lazy context loading
 	                    const dataAttrs = (n.doc && n.line) 
@@ -1197,7 +1635,7 @@ HTML_PAGE = '''<!DOCTYPE html>
 	                        : '';
 	                    
 	                    group += `
-	                        <li class="result-item ${isLocal ? 'local' : ''}" 
+	                        <li class="result-item ${isLocal ? 'local' : ''} ring-${ring}" 
                                 data-word="${labelKey}"
 	                            title="${escHtml(tooltip)}"
 	                            ${dataAttrs}>
@@ -1232,7 +1670,8 @@ HTML_PAGE = '''<!DOCTYPE html>
 		                    const doc = item.dataset.doc;
 		                    const line = item.dataset.line;
 	                        const ctxHash = item.dataset.ctxHash;
-                            const word = safeDecode(item.dataset.word || '') || (item.querySelector('.result-word')?.textContent || '');
+                                const wEl = item.querySelector('.result-word');
+	                            const word = safeDecode(item.dataset.word || '') || (wEl ? (wEl.textContent || '') : '');
                             const query = String(data.query || queryInput.value || '').trim();
 		                    if (doc && line) {
 		                        await showContext(item, doc, line, ctxHash, word, query);
