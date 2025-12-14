@@ -755,11 +755,28 @@ def ingest(file_path: str) -> str:
         files = [path]
     else:
         # Recursively find code files
-        files = (
+        all_files = (
             list(path.rglob("*.py")) +
             list(path.rglob("*.md")) +
             list(path.rglob("*.txt"))
         )
+        
+        # Filter using .gitignore if present (Theory: Explicit user declaration, not heuristic)
+        gitignore_path = path / '.gitignore'
+        if gitignore_path.exists():
+            try:
+                import pathspec
+                gitignore_text = gitignore_path.read_text(encoding='utf-8')
+                spec = pathspec.PathSpec.from_lines('gitwildmatch', gitignore_text.splitlines())
+                # Filter out gitignored files
+                files = [f for f in all_files if not spec.match_file(str(f.relative_to(path)))]
+            except Exception:
+                # If .gitignore parsing fails, use all files
+                files = all_files
+        else:
+            # No .gitignore → index everything (honest, user made no declaration)
+            files = all_files
+        
         if not files:
             return json.dumps({"error": f"No .py/.md/.txt files found in {file_path}"})
     

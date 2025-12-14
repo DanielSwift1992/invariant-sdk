@@ -173,11 +173,25 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     print(f"  Mean mass: {client.mean_mass:.4f}")
     print()
     
+    
     # Collect files
     if input_path.is_file():
         files = [input_path]
     else:
-        files = list(input_path.rglob("*.txt")) + list(input_path.rglob("*.md")) + list(input_path.rglob("*.py"))
+        all_files = list(input_path.rglob("*.txt")) + list(input_path.rglob("*.md")) + list(input_path.rglob("*.py"))
+        
+        # Filter using .gitignore if present (Theory: Explicit user declaration)
+        gitignore_path = input_path / '.gitignore'
+        if gitignore_path.exists():
+            try:
+                import pathspec
+                gitignore_text = gitignore_path.read_text(encoding='utf-8')
+                spec = pathspec.PathSpec.from_lines('gitwildmatch', gitignore_text.splitlines())
+                files = [f for f in all_files if not spec.match_file(str(f.relative_to(input_path)))]
+            except Exception:
+                files = all_files
+        else:
+            files = all_files
     
     print(f"Found {len(files)} files to process")
     print()
