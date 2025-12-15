@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "invarianthub"
-version = "1.2.3"
+version = "1.2.4"
 description = "Deterministic Knowledge Engine - Semantic Kernel for LLM Agents"
 readme = "README.md"
 license = {text = "MIT"}
