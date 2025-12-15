@@ -171,32 +171,36 @@ def status() -> str:
 @mcp.tool()
 def locate(issue_text: str, max_results: int = 0) -> str:
     """
-    Find relevant files AND exact definition lines from issue text.
+    Find relevant files with ALL occurrences of semantic anchors.
     
     USE INSTEAD OF: grep -rn, rg, find (repo-wide searches)
     
-    KEY FEATURE: Coordinate Resolution
-        - Finds the EXACT line where query words co-occur
-        - Prioritizes definitions (def, class) over usages
-        - Returns preview at that line - usually enough to start fixing!
+    HOW IT WORKS:
+        1. Extracts semantic anchors (solid words with high Mass)
+        2. Filters out Gas words (common words like 'def', 'the', 'import')
+        3. Returns files + ALL occurrences with line content
     
     Example:
-        locate("def separability_matrix")
-        → Returns: {file: "separable.py", first_match: {line: 293, preview: "def separability_matrix(...):"}}
+        locate("separability_matrix")
+        → Returns: {
+            file: "separable.py",
+            occurrences: [
+                {line: 32, content: "from .separable import separability_matrix"},
+                {line: 293, content: "def separability_matrix(transform):"}
+            ]
+          }
         
-        NO NEED FOR GREP - the preview shows the definition!
+        Agent sees all occurrences and picks which one to investigate!
     
-    How it works:
-        1. Semantic search (Crystal) → finds relevant files
-        2. Coordinate resolution → finds best line in each file
-        3. Definition priority → shows def/class first, not imports
+    THEORY: All σ-observations have equal weight (Hierarchy Law).
+            No magic ranking - agent has full control.
     
     Args:
-        issue_text: Paste error, keywords, or "def function_name" to find definition
+        issue_text: Paste error message or function/class name to find
         max_results: How many files to return (0 = all with score > 1)
     
     Returns:
-        JSON with files + first_match preview at the BEST line (definition if exists)
+        JSON with files + occurrences list (line + content for each)
     """
     _ensure_initialized()
     
@@ -302,61 +306,24 @@ def locate(issue_text: str, max_results: int = 0) -> str:
                     text = path.read_text(encoding='utf-8')
                     lines = text.split('\n')
                     
-                    # COORDINATE RESOLUTION (replaces grep):
-                    # Find the line where ALL query words co-occur
-                    # Priority: 1) All words on same line, 2) Definition (def/class), 3) First occurrence
+                    # THEORY-COMPLIANT: Show ALL occurrences, let agent decide
+                    # Per Hierarchy Law: all σ-observations are equal weight
+                    # No magic ranking - agent sees context and chooses
                     
-                    query_words_lower = [w.lower() for w in unique_words if len(w) >= 3]
-                    best_line = None
-                    best_score = -1
+                    occurrences = []
+                    for line_num in info["lines"][:10]:  # Limit to 10 per file
+                        if 1 <= line_num <= len(lines):
+                            content = lines[line_num - 1].rstrip()[:120]
+                            occurrences.append({
+                                "line": line_num,
+                                "content": content
+                            })
                     
-                    # Scan ALL lines in file (not just candidate_lines) for co-occurrence
-                    # This is the key to replacing grep: find exact definition line
-                    # Limit to 500 lines for performance (most definitions are near top)
-                    scan_limit = min(len(lines), 500)
-                    
-                    for line_num in range(1, scan_limit + 1):
-                        line_content = lines[line_num - 1].lower()
-                        
-                        # Score: how many query words appear on this line?
-                        words_on_line = sum(1 for w in query_words_lower if w in line_content)
-                        if words_on_line == 0:
-                            continue  # No match, skip
-                        
-                        score = words_on_line * 10
-                        
-                        # Bonus for definitions (def/class/async def)
-                        stripped = lines[line_num - 1].strip()
-                        if stripped.startswith(('def ', 'class ', 'async def ')):
-                            score += 100  # Strong preference for definitions
-                        
-                        # Bonus if line is in candidate_lines (overlay confirmed)
-                        if line_num in info["lines"]:
-                            score += 5
-                        
-                        if score > best_score:
-                            best_score = score
-                            best_line = line_num
-                    
-                    # Fallback to first candidate_line if no scoring worked
-                    if best_line is None and info["lines"]:
-                        best_line = info["lines"][0]
-                    
-                    if 1 <= best_line <= len(lines):
-                        # Get line + 1 context line after (minimal, per MDL)
-                        preview_lines = []
-                        idx = best_line - 1
-                        preview_lines.append(f"{best_line}: {lines[idx].rstrip()[:100]}")
-                        if idx + 1 < len(lines):
-                            preview_lines.append(f"{best_line+1}: {lines[idx+1].rstrip()[:100]}")
-                        
-                        result_entry["first_match"] = {
-                            "line": best_line,
-                            "preview": "\n".join(preview_lines)
-                        }
+                    if occurrences:
+                        result_entry["occurrences"] = occurrences
                         preview_count += 1
                 except Exception:
-                    pass  # Skip preview on error
+                    pass  # Skip on error
         
         results.append(result_entry)
     
