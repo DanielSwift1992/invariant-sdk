@@ -23,7 +23,8 @@ _TOKEN_RE = re.compile(r"[A-Za-z0-9_]{3,}")
 
 
 def _normalize(raw: str) -> str | None:
-    token = raw.strip("_").lower()
+    """Normalize token: lowercase only. Preserve underscores (important for code!)"""
+    token = raw.lower()
     if len(token) < 3:
         return None
     if not any("a" <= c <= "z" for c in token):
