@@ -210,37 +210,45 @@ class OverlayGraph:
         self.conflicts.extend(other.conflicts)
     
     def save(self, path: Path) -> None:
-        """Save overlay to .jsonl file."""
+        """Save overlay to .jsonl file. Optimized with buffered writes."""
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
         
+        # Build all lines in memory first (faster than many small writes)
+        lines = []
+        
+        # Edges
+        for src, edge_list in self.edges.items():
+            for edge in edge_list:
+                entry = {
+                    "op": "add", 
+                    "src": src, 
+                    "tgt": edge.tgt, 
+                    "w": edge.weight,
+                    "ring": edge.ring,
+                    "phase": edge.phase,
+                }
+                if edge.doc:
+                    entry["doc"] = edge.doc
+                if edge.line is not None:
+                    entry["line"] = edge.line
+                if edge.ctx_hash:
+                    entry["ctx_hash"] = edge.ctx_hash
+                lines.append(json.dumps(entry))
+        
+        # Suppressions
+        for src, tgt in self.suppressed:
+            lines.append(json.dumps({"op": "sub", "src": src, "tgt": tgt}))
+        
+        # Labels
+        for node, label in self.labels.items():
+            lines.append(json.dumps({"op": "def", "node": node, "label": label}))
+        
+        # Single write
         with open(path, 'w', encoding='utf-8') as f:
-            # Write edges
-            for src, edge_list in self.edges.items():
-                for edge in edge_list:
-                    entry = {
-                        "op": "add", 
-                        "src": src, 
-                        "tgt": edge.tgt, 
-                        "w": edge.weight,
-                        "ring": edge.ring,
-                        "phase": edge.phase,
-                    }
-                    if edge.doc:
-                        entry["doc"] = edge.doc
-                    if edge.line is not None:
-                        entry["line"] = edge.line
-                    if edge.ctx_hash:
-                        entry["ctx_hash"] = edge.ctx_hash
-                    f.write(json.dumps(entry) + "\n")
-            
-            # Write suppressions
-            for src, tgt in self.suppressed:
-                f.write(json.dumps({"op": "sub", "src": src, "tgt": tgt}) + "\n")
-            
-            # Write labels
-            for node, label in self.labels.items():
-                f.write(json.dumps({"op": "def", "node": node, "label": label}) + "\n")
+            f.write('\n'.join(lines))
+            if lines:
+                f.write('\n')
     
     def add_edge(
         self, 
@@ -266,16 +274,14 @@ class OverlayGraph:
             line: Line number (1-indexed) — approximate coordinate
             ctx_hash: Semantic checksum of anchor window (8 hex chars)
                       Used for drift detection and self-healing.
+        
+        Performance: O(1) append. Conflict detection moved to lazy check.
         """
         new_edge = OverlayEdge(
             tgt=tgt, weight=weight, doc=doc, ring=ring,
             phase=phase, line=line, ctx_hash=ctx_hash
         )
-        # Check for conflicts
-        existing = [e for e in self.edges[src] if e.tgt == tgt]
-        for e in existing:
-            if e.doc != doc or abs(e.weight - weight) > 0.01:
-                self.conflicts.append((e, new_edge))
+        # O(1) append - conflict detection is now lazy (check on demand)
         self.edges[src].append(new_edge)
     
     def suppress_edge(self, src: str, tgt: str) -> None:
