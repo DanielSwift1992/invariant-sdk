@@ -68,6 +68,8 @@ _physics = None
 _overlay = None
 _overlay_path = None
 _halo_meta_cache: dict[str, dict] = {}
+_overlay_index = None
+_overlay_index_key: Optional[tuple] = None
 
 
 def _ensure_initialized():
@@ -206,14 +208,14 @@ def locate(issue_text: str, max_results: int = 0) -> str:
     
     import math
     from invariant_sdk.cli import hash8_hex
-    from invariant_sdk.tokenize import dedupe_preserve_order, tokenize_simple
+    from invariant_sdk.engine import OverlayIndex, locate_files, tokenize_query
     
     # Extract ALL words from issue text (universal tokenization)
     # Let the crystal classify them by mass (solid vs gas)
     # NO heuristics: no stopwords, no programming-specific patterns
     
     # Extract deterministic surface tokens (supports snake_case identifiers).
-    unique_words = dedupe_preserve_order(tokenize_simple(issue_text))
+    unique_words = tokenize_query(issue_text)
     
     if not unique_words:
         return json.dumps({"error": "No words found in issue_text"})
@@ -229,21 +231,26 @@ def locate(issue_text: str, max_results: int = 0) -> str:
     gas_seeds = []
     unknown_words = []
     
+    # Build (cached) overlay index once per overlay state.
+    global _overlay_index, _overlay_index_key
+    idx_key = (id(_overlay), _overlay.n_edges, len(_overlay.labels or {}))
+    if _overlay_index is None or _overlay_index_key != idx_key:
+        _overlay_index = OverlayIndex.build(_overlay)
+        _overlay_index_key = idx_key
+
     # Step 1: Check which words exist in overlay (fast, no HTTP)
     overlay_known = set()
     for word, h8 in word_hashes.items():
-        # Check if word exists as label in overlay
-        if h8 in _overlay.labels or any(h8 == e.tgt for edges in _overlay.edges.values() for e in edges):
+        # Deterministic: treat any overlay-present node as solid (it passed Phase Separation at ingest time).
+        if h8 in _overlay_index.known_hashes or h8 in (_overlay.labels or {}):
             overlay_known.add(word)
-            # Treat all overlay words as solid (they were anchors at ingest time)
             solid_seeds.append((word, h8, 1.0))
-        elif word in _overlay.labels.values():
-            # Word label exists, find its hash
-            for node, label in _overlay.labels.items():
-                if label == word:
-                    overlay_known.add(word)
-                    solid_seeds.append((word, node, 1.0))
-                    break
+            continue
+        # Backward-compat: label-to-hash mapping (rare).
+        node = _overlay_index.label_to_hash.get(str(word).strip().lower())
+        if node:
+            overlay_known.add(word)
+            solid_seeds.append((word, node, 1.0))
     
     # Step 2: Only call Crystal for words NOT in overlay (if any)
     words_needing_crystal = [w for w in unique_words if w not in overlay_known]
@@ -269,106 +276,21 @@ def locate(issue_text: str, max_results: int = 0) -> str:
             for word in words_needing_crystal:
                 unknown_words.append(word)
     
-    # Create lookup for ALL query words (not just crystal-classified)
-    # Crystal classification is OPTIONAL (provides mass), not a filter
-    all_word_hashes = word_hashes  # All query words
-    word_mass_lookup = {word: mass for word, h8, mass in solid_seeds + gas_seeds}
-    
-    
-    # Search overlay for ALL query words
-    # CRITICAL: Check both as source (edges.get) AND as target (iterate all)
-    file_scores = {}  # doc -> {words, lines}
-    
-    query_hashes = set(all_word_hashes.values())
-    
-    # Build reverse lookup: find all edges where our query words appear as tgt
-    for word, h8 in all_word_hashes.items():
-        # Check as SOURCE (word -> something)
-        for edge in _overlay.edges.get(h8, []):
-            if not edge.doc:
-                continue
-            if edge.doc not in file_scores:
-                file_scores[edge.doc] = {"words": set(), "lines": []}
-            file_scores[edge.doc]["words"].add(word)
-            if edge.line and edge.line not in file_scores[edge.doc]["lines"]:
-                file_scores[edge.doc]["lines"].append(edge.line)
-    
-    # Check as TARGET (something -> word)
-    for src_hash, edge_list in _overlay.edges.items():
-        for edge in edge_list:
-            if edge.tgt in query_hashes and edge.doc:
-                # Find which word this target hash belongs to
-                for word, h8 in all_word_hashes.items():
-                    if h8 == edge.tgt:
-                        if edge.doc not in file_scores:
-                            file_scores[edge.doc] = {"words": set(), "lines": []}
-                        file_scores[edge.doc]["words"].add(word)
-                        if edge.line and edge.line not in file_scores[edge.doc]["lines"]:
-                            file_scores[edge.doc]["lines"].append(edge.line)
-                        break
-    
-    # Calculate score: solid matches = 2^n, gas matches add 1 each
-    # This is theory: solid = high information, gas = low information
-    for doc in file_scores:
-        info = file_scores[doc]
-        n_words = len(info["words"])
-        # Score based on number of UNIQUE words matched
-        info["score"] = 2 ** n_words
-        info["words"] = list(info["words"])
-        info["lines"] = sorted(info["lines"])[:10]
-    
-    # Rank results
-    ranked = sorted(file_scores.items(), key=lambda x: x[1]["score"], reverse=True)
-    
-    # Filter: only files with score > 1 (at least 1 matching seed)
-    # max_results=0 means return all matching files
-    results = []
-    preview_count = 0  # Only read files for top N previews (MDL: minimize reads)
-    MAX_PREVIEWS = 5
-    
-    for doc, info in ranked:
-        if info["score"] <= 1:
-            continue  # No real match
-        if max_results > 0 and len(results) >= max_results:
-            break
-        
-        result_entry = {
-            "file": doc,
-            "score": info["score"],
-            "matching_words": info["words"],
-            "n_matches": len(info["words"]),
-            "candidate_lines": info["lines"],
-        }
-        
-        # Add mini-preview for top N files (Bisection Law: more bits per call)
-        # Theory: coordinates + preview = actionable immediately, no need for scoped_grep
-        if preview_count < MAX_PREVIEWS and info["lines"]:
-            path = _find_doc_path(doc)
-            if path:
-                try:
-                    text = path.read_text(encoding='utf-8')
-                    lines = text.split('\n')
-                    
-                    # THEORY-COMPLIANT: Show ALL occurrences, let agent decide
-                    # Per Hierarchy Law: all σ-observations are equal weight
-                    # No magic ranking - agent sees context and chooses
-                    
-                    occurrences = []
-                    for line_num in info["lines"][:10]:  # Limit to 10 per file
-                        if 1 <= line_num <= len(lines):
-                            content = lines[line_num - 1].rstrip()[:120]
-                            occurrences.append({
-                                "line": line_num,
-                                "content": content
-                            })
-                    
-                    if occurrences:
-                        result_entry["occurrences"] = occurrences
-                        preview_count += 1
-                except Exception:
-                    pass  # Skip on error
-        
-        results.append(result_entry)
+    # File discovery + bounded previews (shared engine with UI/CLI).
+    locate_out = locate_files(
+        issue_text,
+        overlay=_overlay,
+        index=_overlay_index,
+        max_results=int(max_results or 0),
+        preview_files=5,
+        preview_occurrences=8,
+        resolve_doc_path=_find_doc_path,
+    )
+
+    if locate_out.get("error"):
+        return json.dumps(locate_out, indent=2)
+
+    results = locate_out.get("results") or []
     
     return json.dumps({
         "query_words": unique_words,

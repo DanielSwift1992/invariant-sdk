@@ -620,77 +620,33 @@ def cmd_map(args: argparse.Namespace) -> int:
     Theory: ~50 tokens vs ~5000 for full file read (MDL/Invariant III).
     Agent uses this to understand structure before reading specific lines.
     """
-    import ast
     from pathlib import Path
+    from .engine import map_file
     
     file_path = Path(args.path)
-    if not file_path.exists():
-        print(f"Error: File not found: {file_path}", file=sys.stderr)
+    result = map_file(file_path)
+    if result.get("error"):
+        print(f"Error: {result['error']}", file=sys.stderr)
         return 1
-    
-    if not file_path.is_file():
-        print(f"Error: Not a file: {file_path}", file=sys.stderr)
-        return 1
-    
-    try:
-        content = file_path.read_text(encoding='utf-8')
-    except Exception as e:
-        print(f"Error reading file: {e}", file=sys.stderr)
-        return 1
-    
-    # For Python files, use AST
-    if file_path.suffix == '.py':
-        try:
-            tree = ast.parse(content)
-            items = []
-            
-            for node in ast.walk(tree):
-                if isinstance(node, ast.FunctionDef):
-                    items.append({
-                        "type": "function",
-                        "name": node.name,
-                        "line": node.lineno,
-                        "end_line": node.end_lineno or node.lineno
-                    })
-                elif isinstance(node, ast.AsyncFunctionDef):
-                    items.append({
-                        "type": "async_function",
-                        "name": node.name,
-                        "line": node.lineno,
-                        "end_line": node.end_lineno or node.lineno
-                    })
-                elif isinstance(node, ast.ClassDef):
-                    items.append({
-                        "type": "class",
-                        "name": node.name,
-                        "line": node.lineno,
-                        "end_line": node.end_lineno or node.lineno
-                    })
-            
-            # Sort by line number
-            items.sort(key=lambda x: x["line"])
-            
-            # Print compact output
-            print(f"# {file_path} ({len(content.splitlines())} lines)")
-            for item in items:
-                print(f"  {item['line']:4d}-{item['end_line']:4d}  {item['type']:15s}  {item['name']}")
-            
-            return 0
-            
-        except SyntaxError as e:
-            print(f"# {file_path} (syntax error: {e})")
-            # Fallback to line count
-    
-    # For non-Python or on error, just show line count
-    lines = content.splitlines()
-    print(f"# {file_path} ({len(lines)} lines)")
-    
-    # Show first few def/class lines as hint
-    for i, line in enumerate(lines[:100], 1):
-        stripped = line.strip()
-        if stripped.startswith(('def ', 'class ', 'async def ', 'function ', 'const ', 'let ', 'var ')):
-            print(f"  {i:4d}  {stripped[:60]}")
-    
+
+    lines_total = int(result.get("lines_total") or 0)
+    print(f"# {file_path} ({lines_total} lines)")
+
+    items = result.get("items") or []
+    if not isinstance(items, list):
+        return 0
+
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        line = int(item.get("line") or 0)
+        end_line = int(item.get("end_line") or line)
+        typ = str(item.get("type") or "").strip() or "item"
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        print(f"  {line:4d}-{end_line:4d}  {typ:15s}  {name}")
+
     return 0
 
 

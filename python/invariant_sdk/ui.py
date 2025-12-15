@@ -27,11 +27,13 @@ try:
     from .halo import hash8_hex
     from .overlay import OverlayGraph, find_overlays
     from .physics import HaloPhysics
+    from .engine import OverlayIndex, locate_files, map_file
     from .ui_pages import render_main_page
 except ImportError:
     from invariant_sdk.halo import hash8_hex
     from invariant_sdk.overlay import OverlayGraph, find_overlays
     from invariant_sdk.physics import HaloPhysics
+    from invariant_sdk.engine import OverlayIndex, locate_files, map_file
     from invariant_sdk.ui_pages import render_main_page
 
 
@@ -50,7 +52,10 @@ class UIHandler(BaseHTTPRequestHandler):
     
     _degree_total_cache: Dict[str, int] = {}
     _degree_total_crystal_id: Optional[str] = None
-
+    _overlay_index: Optional[OverlayIndex] = None
+    _overlay_index_key: Optional[tuple] = None
+    _docs_cache: Optional[list[dict]] = None
+    
     _ANCHOR_SCAN_RADIUS = 50
     
     def log_message(self, format, *args):
@@ -81,6 +86,10 @@ class UIHandler(BaseHTTPRequestHandler):
             self.serve_graph3d_page(parsed.query)
         elif parsed.path == '/doc':
             self.serve_doc_page(parsed.query)
+        elif parsed.path == '/api/locate':
+            self.api_locate(parsed.query)
+        elif parsed.path == '/api/structure':
+            self.api_structure(parsed.query)
         elif parsed.path == '/api/search':
             self.api_search(parsed.query)
         elif parsed.path == '/api/suggest':
@@ -126,12 +135,97 @@ class UIHandler(BaseHTTPRequestHandler):
             )
         )
 
+    @classmethod
+    def _invalidate_overlay_caches(cls) -> None:
+        cls._graph_cache_key = None
+        cls._graph_cache_value = None
+        cls._overlay_index = None
+        cls._overlay_index_key = None
+        cls._docs_cache = None
+
+    @classmethod
+    def _get_overlay_index(cls) -> Optional[OverlayIndex]:
+        overlay = cls.overlay
+        if not overlay:
+            return None
+        key = (id(overlay), overlay.n_edges, len(overlay.labels or {}))
+        if cls._overlay_index is None or cls._overlay_index_key != key:
+            cls._overlay_index = OverlayIndex.build(overlay)
+            cls._overlay_index_key = key
+            cls._docs_cache = None
+        return cls._overlay_index
+
+    def api_locate(self, query_string: str):
+        """
+        File-centric search (SERP): issue text -> ranked files (+ previews).
+
+        This is the human-facing default: locate answers "which file should I open?"
+        """
+        params = urllib.parse.parse_qs(query_string)
+        q = (params.get('q', [''])[0] or '').strip()
+        doc_filter = (params.get('doc', [''])[0] or '').strip()
+        try:
+            max_results = int(params.get('k', ['0'])[0] or 0)
+        except Exception:
+            max_results = 0
+
+        if not q:
+            self.send_json({'error': 'No query'}, 400)
+            return
+
+        overlay = UIHandler.overlay
+        if not overlay:
+            self.send_json({'query': q, 'doc': doc_filter or None, 'files_found': 0, 'results': []})
+            return
+
+        idx = UIHandler._get_overlay_index()
+
+        def _resolve(doc: str) -> Optional[Path]:
+            p, _cands = self._resolve_doc_path(doc)
+            return p
+
+        out = locate_files(
+            q,
+            overlay=overlay,
+            index=idx,
+            doc_filter=doc_filter,
+            max_results=max_results,
+            preview_files=10,
+            preview_occurrences=8,
+            resolve_doc_path=_resolve,
+        )
+        if out.get("error"):
+            self.send_json(out, 400)
+            return
+
+        out["query"] = q
+        out["doc"] = doc_filter or None
+        self.send_json(out)
+
+    def api_structure(self, query_string: str):
+        """Return compact outline for a single file (inv_map for humans)."""
+        params = urllib.parse.parse_qs(query_string or "")
+        doc = (params.get('doc', [''])[0] or '').strip()
+        if not doc:
+            self.send_json({'error': 'Missing doc parameter'}, 400)
+            return
+
+        doc_path, candidates = self._resolve_doc_path(doc)
+        if not doc_path:
+            self.send_json({'error': f'Document not found: {doc}', 'searched': [str(c) for c in candidates]}, 404)
+            return
+
+        out = map_file(doc_path)
+        out["doc"] = doc
+        self.send_json(out)
+
     def serve_doc_page(self, query_string: str = ""):
-        """Document chooser + per-document view (local overlay)."""
+        """File page (outline + matches) and file chooser."""
         overlay = UIHandler.overlay
         physics = UIHandler.physics
         params = urllib.parse.parse_qs(query_string or "")
         doc = (params.get('doc', [''])[0] or '').strip()
+        q = (params.get('q', [''])[0] or '').strip()
 
         ui_font_links = (
             "<link rel='preconnect' href='https://fonts.googleapis.com'/>"
@@ -159,28 +253,26 @@ class UIHandler(BaseHTTPRequestHandler):
                 "</body></html>"
             )
             return
-        
-        # Build doc stats
-        docs: dict[str, dict] = {}
-        for src, edge_list in overlay.edges.items():
-            for edge in edge_list:
-                if not edge.doc:
-                    continue
-                d = docs.get(edge.doc)
-                if d is None:
-                    d = {'doc': edge.doc, 'edges': 0, 'nodes': set()}
-                    docs[edge.doc] = d
-                d['edges'] += 1
-                d['nodes'].add(src)
-                d['nodes'].add(edge.tgt)
+
+        idx = UIHandler._get_overlay_index()
+        if UIHandler._docs_cache is None and idx:
+            out: list[dict] = []
+            for d in idx.doc_stats.values():
+                out.append({'doc': d.doc, 'edges': int(d.edges), 'nodes': int(d.nodes)})
+            out.sort(key=lambda x: (-int(x.get('edges') or 0), str(x.get('doc') or '').lower()))
+            UIHandler._docs_cache = out
+        docs_list: list[dict] = UIHandler._docs_cache or []
         
         if not doc:
             items = []
-            for name, d in sorted(docs.items(), key=lambda kv: (-kv[1]['edges'], kv[0].lower())):
+            for d in docs_list:
+                name = str(d.get("doc") or "")
+                if not name:
+                    continue
                 items.append(
                     f"<a class='item' href='/doc?doc={urllib.parse.quote(name)}'>"
                     f"<span class='name'>{html.escape(name)}</span>"
-                    f"<span class='meta'>{d['edges']} edges • {len(d['nodes'])} nodes</span>"
+                    f"<span class='meta'>{int(d.get('edges') or 0)} edges • {int(d.get('nodes') or 0)} nodes</span>"
                     f"</a>"
                 )
             crystal = html.escape(physics.crystal_id if physics else "unknown")
@@ -208,54 +300,173 @@ class UIHandler(BaseHTTPRequestHandler):
             )
             self.send_html(page)
             return
-        
-        if doc not in docs:
-            self.send_error(404, "Unknown document")
-            return
-        
-        d = docs[doc]
-        doc_q = urllib.parse.quote(doc)
-        graph_href = f"/graph3d?doc={doc_q}"
-        graph_embed = f"/graph3d?embed=1&doc={doc_q}"
-        
-        # Collect nodes in this doc (sorted by label)
-        nodes = sorted((overlay.labels.get(h8) or h8[:8], h8) for h8 in d['nodes'])
-        node_links = []
-        for label, _h8 in nodes[:400]:
-            q = urllib.parse.quote(label)
-            node_links.append(
-                f"<a class='pill' href='/?q={q}&doc={doc_q}'>{html.escape(label)}</a>"
+
+        # File page
+        doc_path, searched = self._resolve_doc_path(doc)
+        if not doc_path:
+            searched_html = "".join(f"<li>{html.escape(str(p))}</li>" for p in searched[:10])
+            self.send_html(
+                "<!doctype html><html><head><meta charset='utf-8'/>"
+                "<meta name='viewport' content='width=device-width,initial-scale=1'/>"
+                + ui_font_links
+                + "<title>File not found — Invariant</title>"
+                "<style>"
+                + ui_css
+                + "</style></head><body>"
+                f"<h1>File not found</h1><p class='sub'>{html.escape(doc)}</p>"
+                "<p><a href='/'>← Back</a></p>"
+                + (f"<h3 style='margin-top:18px;'>Searched</h3><ul>{searched_html}</ul>" if searched_html else "")
+                + "</body></html>"
             )
-        
-        crystal = html.escape(physics.crystal_id if physics else "unknown")
+            return
+
+        outline = map_file(doc_path)
+
+        # Optional matches (query -> this file only).
+        matches_words: list[str] = []
+        occurrences: list[dict] = []
+        open_line = 1
+        if q and idx:
+            def _resolve(_doc: str) -> Optional[Path]:
+                return doc_path
+
+            hit = locate_files(
+                q,
+                overlay=overlay,
+                index=idx,
+                doc_filter=doc,
+                max_results=1,
+                preview_files=1,
+                preview_occurrences=10,
+                resolve_doc_path=_resolve,
+            )
+            res = (hit.get("results") or [])
+            if res:
+                r0 = res[0]
+                matches_words = list(r0.get("matching_words") or [])
+                occurrences = list(r0.get("occurrences") or [])
+                if occurrences:
+                    try:
+                        open_line = int(occurrences[0].get("line") or 1)
+                    except Exception:
+                        open_line = 1
+
+        def _outline_html() -> str:
+            if outline.get("error"):
+                return f"<div style='color:#ef4444;font-size:13px;'>{html.escape(str(outline.get('error')))}</div>"
+            items = outline.get("items") or []
+            if not isinstance(items, list) or not items:
+                return "<div style='color:var(--text3);font-size:13px;'>No outline available.</div>"
+            rows = []
+            for it in items[:160]:
+                if not isinstance(it, dict):
+                    continue
+                line = int(it.get("line") or 0)
+                end = int(it.get("end_line") or line)
+                name = str(it.get("name") or "").strip()
+                typ = str(it.get("type") or "").strip()
+                if not name or not line:
+                    continue
+                label = f"{typ} {name}".strip()
+                loc = f"{line}" + (f"-{end}" if end and end != line else "")
+                rows.append(
+                    f"<div class='rowItem' data-line='{line}' title='{html.escape(label)}'>"
+                    f"<div class='rowName'>{html.escape(label)}</div>"
+                    f"<div class='rowLoc'>{html.escape(loc)}</div>"
+                    "</div>"
+                )
+            return "".join(rows)
+
+        def _matches_html() -> str:
+            if not q:
+                return "<div style='color:var(--text3);font-size:13px;'>No query provided.</div>"
+            if not occurrences:
+                return "<div style='color:var(--text3);font-size:13px;'>No matches in this file for the current query.</div>"
+            rows = []
+            for o in occurrences[:20]:
+                try:
+                    line = int(o.get("line") or 0)
+                except Exception:
+                    line = 0
+                content = str(o.get("content") or "").rstrip()
+                if not line:
+                    continue
+                rows.append(
+                    "<div class='occItem' data-line='{ln}'>"
+                    "<div class='occLoc'>{ln}</div>"
+                    "<div class='occText'>{txt}</div>"
+                    "</div>".format(ln=line, txt=html.escape(content))
+                )
+            return "".join(rows)
+
+        doc_q = urllib.parse.quote(doc)
+        back_href = "/"
+        if q:
+            back_href = f"/?q={urllib.parse.quote(q)}"
+        graph_href = f"/graph3d?doc={doc_q}&radius=2"
+        crystal = html.escape(physics.crystal_id if physics else "offline")
+        matches_badges = " ".join(f"<span class='pill'>{html.escape(w)}</span>" for w in matches_words[:16]) if matches_words else ""
+
         page = (
             "<!doctype html><html><head><meta charset='utf-8'/>"
             "<meta name='viewport' content='width=device-width,initial-scale=1'/>"
-            + ui_font_links +
-            "<title>Doc — Invariant</title>"
+            + ui_font_links
+            + "<title>File — Invariant</title>"
             "<style>"
-            + ui_css +
-            ".row{display:flex;gap:12px;flex-wrap:wrap;align-items:center;margin:10px 0 16px;}"
-            ".row a{font-size:13px;}"
-            ".frame{width:100%;height:70vh;border:1px solid var(--border);border-radius:14px;overflow:hidden;background:rgba(255,255,255,0.02);}"
-            "iframe{width:100%;height:100%;border:0;}"
-            ".pills{margin-top:14px;display:flex;flex-wrap:wrap;gap:8px;max-width:1100px;}"
-            ".pill{padding:6px 10px;border:1px solid var(--border);border-radius:999px;background:rgba(17,17,19,0.85);"
-            "text-decoration:none;color:var(--text);font-size:12px;font-family:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;}"
-            ".pill:hover{border-color:rgba(59,130,246,0.65);background:var(--accentDim);}"
-            "</style></head><body>"
-            f"<h1>{html.escape(doc)}</h1>"
-            f"<p class='sub'>Crystal: <strong>{crystal}</strong> • {d['edges']} edges • {len(d['nodes'])} nodes</p>"
-            "<div class='row'>"
-            f"<a href='/'>← Back</a>"
-            f"<a href='{graph_href}' target='_blank'>Open 3D</a>"
-            f"<a href='/doc'>All docs</a>"
-            "</div>"
-            f"<div class='frame'><iframe src='{graph_embed}'></iframe></div>"
-            "<div class='pills'>"
-            + "".join(node_links)
+            + ui_css
+            + ".container{max-width:1100px;margin:0 auto;}"
+            + ".top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap;margin-bottom:14px;}"
+            + ".actions{display:flex;gap:10px;flex-wrap:wrap;align-items:center;}"
+            + ".btn{border:1px solid rgba(255,255,255,0.10);background:rgba(255,255,255,0.03);color:var(--text);"
+              "padding:8px 12px;border-radius:12px;font-size:12px;cursor:pointer;font-family:'JetBrains Mono',ui-monospace,monospace;}"
+            + ".btn:hover{border-color:rgba(59,130,246,0.35);background:rgba(59,130,246,0.06);}"
+            + ".card{margin-top:14px;padding:14px 16px;border:1px solid var(--border);border-radius:14px;background:rgba(17,17,19,0.85);}"
+            + ".h{font-size:13px;color:var(--text2);margin:0 0 10px;font-family:'JetBrains Mono',ui-monospace,monospace;}"
+            + ".rowItem{display:flex;justify-content:space-between;gap:12px;align-items:baseline;padding:8px 10px;border-radius:12px;"
+              "border:1px solid transparent;cursor:pointer;}"
+            + ".rowItem:hover{border-color:rgba(255,255,255,0.08);background:rgba(255,255,255,0.03);}"
+            + ".rowName{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;}"
+            + ".rowLoc{flex-shrink:0;color:var(--text3);font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;}"
+            + ".occItem{display:flex;gap:12px;align-items:baseline;padding:8px 10px;border-radius:12px;border:1px solid rgba(255,255,255,0.06);"
+              "background:rgba(0,0,0,0.18);cursor:pointer;margin-bottom:8px;}"
+            + ".occItem:hover{border-color:rgba(255,255,255,0.10);background:rgba(0,0,0,0.24);}"
+            + ".occLoc{min-width:56px;text-align:right;color:var(--text3);font-family:'JetBrains Mono',ui-monospace,monospace;font-size:12px;}"
+            + ".occText{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text);"
+              "font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;font-size:12px;}"
+            + ".pill{display:inline-flex;align-items:center;padding:3px 8px;border-radius:999px;border:1px solid rgba(255,255,255,0.10);"
+              "background:rgba(17,17,19,0.65);color:var(--text);font-family:'JetBrains Mono',ui-monospace,monospace;font-size:11px;margin-right:6px;}"
+            + "</style></head><body><div class='container'>"
+            + "<div class='top'>"
+            + f"<div style='min-width:0;'><h1 style='margin-bottom:6px;'>{html.escape(doc)}</h1>"
+            + f"<p class='sub'>Crystal: <strong>{crystal}</strong> • {doc_path.as_posix()}</p></div>"
+            + "<div class='actions'>"
+            + f"<a class='btn' href='{back_href}'>← Back</a>"
+            + f"<button class='btn' data-open='vscode'>VS Code</button>"
+            + f"<button class='btn' data-open='open'>Open</button>"
+            + f"<button class='btn' data-open='reveal'>Reveal</button>"
+            + f"<a class='btn' href='{graph_href}' target='_blank'>Graph</a>"
+            + "</div></div>"
+            + "<div class='card'>"
+            + "<div class='h'>Outline</div>"
+            + _outline_html()
             + "</div>"
-            "</body></html>"
+            + "<div class='card'>"
+            + f"<div class='h'>Matches {('for “' + html.escape(q) + '”') if q else ''}</div>"
+            + (f"<div style='margin-bottom:10px;'>{matches_badges}</div>" if matches_badges else "")
+            + _matches_html()
+            + "</div>"
+            + f"<script>const DOC={json.dumps(doc)};const OPEN_LINE={int(open_line)};"
+              "document.querySelectorAll('[data-open]').forEach(btn=>{btn.onclick=async(e)=>{e.preventDefault();"
+              "const mode=btn.dataset.open;try{await fetch('/api/open?mode='+encodeURIComponent(mode)"
+              "+'&doc='+encodeURIComponent(DOC)+'&line='+encodeURIComponent(String(OPEN_LINE)))}catch(e){}}});"
+              "document.querySelectorAll('.rowItem').forEach(el=>{el.onclick=async(e)=>{e.preventDefault();"
+              "const ln=el.dataset.line||'1';try{await fetch('/api/open?mode=vscode&doc='+encodeURIComponent(DOC)"
+              "+'&line='+encodeURIComponent(ln))}catch(e){}}});"
+              "document.querySelectorAll('.occItem').forEach(el=>{el.onclick=async(e)=>{e.preventDefault();"
+              "const ln=el.dataset.line||'1';try{await fetch('/api/open?mode=vscode&doc='+encodeURIComponent(DOC)"
+              "+'&line='+encodeURIComponent(ln))}catch(e){}}});"
+              "</script>"
+            + "</div></body></html>"
         )
         self.send_html(page)
     
@@ -925,6 +1136,7 @@ class UIHandler(BaseHTTPRequestHandler):
         - Returns coordinates (+ ctx_hash) so UI can fetch /api/context lazily
         """
         overlay = UIHandler.overlay
+        idx = UIHandler._get_overlay_index()
         params = urllib.parse.parse_qs(query_string or "")
         q_raw = (params.get('q', [''])[0] or '').strip()
         doc_filter = (params.get('doc', [''])[0] or '').strip()
@@ -933,7 +1145,7 @@ class UIHandler(BaseHTTPRequestHandler):
             self.send_json({'error': 'No query'}, 400)
             return
 
-        if not overlay:
+        if not overlay or not idx:
             self.send_json({'query': q_raw, 'doc': doc_filter or None, 'total': 0, 'mentions': []})
             return
 
@@ -942,7 +1154,7 @@ class UIHandler(BaseHTTPRequestHandler):
         needle = q_raw.strip().lower()
         h8 = hash8_hex(f"Ġ{needle}")
         
-        # Find all σ-edges where this word is source OR target
+        # Find all σ-edges where this word is source OR target (index-backed, O(deg)).
         mentions = []
         
         # Check edges where word is SOURCE
@@ -960,21 +1172,20 @@ class UIHandler(BaseHTTPRequestHandler):
                 })
         
         # Check edges where word is TARGET
-        for src_hash, edge_list in overlay.edges.items():
-            for edge in edge_list:
-                if edge.tgt != h8:
-                    continue
-                if edge.ring != "sigma":
-                    continue
-                if doc_filter and edge.doc != doc_filter:
-                    continue
-                if edge.doc and edge.line:
-                    mentions.append({
+        for src_hash, edge in idx.incoming.get(h8, []):
+            if edge.ring != "sigma":
+                continue
+            if doc_filter and edge.doc != doc_filter:
+                continue
+            if edge.doc and edge.line:
+                mentions.append(
+                    {
                         'doc': edge.doc,
                         'line': edge.line,
                         'ctx_hash': edge.ctx_hash,
                         'related': overlay.get_label(src_hash) or src_hash[:8],
-                    })
+                    }
+                )
         
         # Deduplicate by doc:line and sort
         seen = set()
@@ -1138,8 +1349,7 @@ class UIHandler(BaseHTTPRequestHandler):
                 UIHandler.overlay_path = default_path
             
             # Clear caches (graph depends on overlay contents).
-            UIHandler._graph_cache_key = None
-            UIHandler._graph_cache_value = None
+            UIHandler._invalidate_overlay_caches()
             
             self.send_json({
                 'success': True,
@@ -1292,8 +1502,7 @@ class UIHandler(BaseHTTPRequestHandler):
                 overlay.save(default_path)
                 UIHandler.overlay_path = default_path
             
-            UIHandler._graph_cache_key = None
-            UIHandler._graph_cache_value = None
+            UIHandler._invalidate_overlay_caches()
             
             self.send_json({
                 'success': True,
@@ -1320,29 +1529,19 @@ class UIHandler(BaseHTTPRequestHandler):
     def api_docs(self):
         """List ingested documents with simple stats (local overlay only)."""
         overlay = UIHandler.overlay
-        if not overlay:
+        idx = UIHandler._get_overlay_index()
+        if not overlay or not idx:
             self.send_json({'docs': []})
             return
-        
-        docs: dict[str, dict] = {}
-        for src, edge_list in overlay.edges.items():
-            for edge in edge_list:
-                if not edge.doc:
-                    continue
-                d = docs.get(edge.doc)
-                if d is None:
-                    d = {'doc': edge.doc, 'edges': 0, 'nodes_set': set()}
-                    docs[edge.doc] = d
-                d['edges'] += 1
-                d['nodes_set'].add(src)
-                d['nodes_set'].add(edge.tgt)
-        
-        out = []
-        for doc, d in docs.items():
-            out.append({'doc': doc, 'edges': d['edges'], 'nodes': len(d['nodes_set'])})
-        
-        out.sort(key=lambda x: (-x['edges'], x['doc'].lower()))
-        self.send_json({'docs': out})
+
+        if UIHandler._docs_cache is None:
+            out: list[dict] = []
+            for doc, st in idx.doc_stats.items():
+                out.append({'doc': doc, 'edges': int(st.edges), 'nodes': int(st.nodes)})
+            out.sort(key=lambda x: (-int(x.get('edges') or 0), str(x.get('doc') or '').lower()))
+            UIHandler._docs_cache = out
+
+        self.send_json({'docs': UIHandler._docs_cache})
     
     def api_conflicts(self):
         """Return detected conflicts from overlay."""
@@ -1893,16 +2092,9 @@ def run_ui(port: int = 8080, server: str = DEFAULT_SERVER, overlay_path: Optiona
     except:
         pass
     
-    # Connect (load overlay consistently for physics + UI)
-    overlays = []
-    if overlay_path:
-        overlays = [overlay_path]
-    else:
-        overlays = find_overlays()
-        if overlays:
-            UIHandler.overlay_path = overlays[-1]
-
+    # Connect to crystal (α). UI must still work offline for σ-only workflows.
     print(f"Connecting to: {server}")
+    physics: Optional[HaloPhysics] = None
     try:
         physics = HaloPhysics(
             server,
@@ -1912,16 +2104,30 @@ def run_ui(port: int = 8080, server: str = DEFAULT_SERVER, overlay_path: Optiona
         UIHandler.physics = physics
         print(f"  Crystal: {physics.crystal_id}")
     except Exception as e:
-        print(f"  Error: {e}")
-        return
+        UIHandler.physics = None
+        print(f"  Crystal: offline ({e})")
 
-    # UI overlay must match physics overlay (Invariant V: no split-brain state)
-    UIHandler.overlay = physics.overlay
-    if overlay_path:
-        UIHandler.overlay_path = overlay_path
+    # Load overlay (σ) deterministically.
+    overlay: Optional[OverlayGraph] = None
+    if physics and physics.overlay:
+        overlay = physics.overlay
+        if overlay_path:
+            UIHandler.overlay_path = overlay_path
+    else:
+        overlays: list[Path] = [overlay_path] if overlay_path else find_overlays()
+        if overlays:
+            UIHandler.overlay_path = overlays[-1]
+            overlay = OverlayGraph.load(overlays[-1])
+        else:
+            overlay = OverlayGraph()
+            UIHandler.overlay_path = overlay_path or Path("./.invariant/overlay.jsonl")
 
-    if physics.overlay:
-        print(f"  Local: {physics.overlay.n_edges} edges, {len(physics.overlay.labels)} labels")
+    UIHandler.overlay = overlay
+    UIHandler._invalidate_overlay_caches()
+    UIHandler._get_overlay_index()
+
+    if overlay:
+        print(f"  Local: {overlay.n_edges} edges, {len(overlay.labels)} labels")
     
     print()
     print(f"→ Open http://localhost:{port}")

@@ -557,13 +557,214 @@ HTML_PAGE = '''<!DOCTYPE html>
             color: var(--text-2);
         }
         
-        .result-meta {
-            display: flex;
-            gap: 16px;
-            font-size: 12px;
-            color: var(--text-3);
-            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-        }
+	        .result-meta {
+	            display: flex;
+	            gap: 16px;
+	            font-size: 12px;
+	            color: var(--text-3);
+	            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+	        }
+
+            /* File SERP (Locate) */
+            .file-card {
+                padding: 14px 16px;
+                border-radius: 12px;
+                background: rgba(255,255,255,0.02);
+                border: 1px solid rgba(255,255,255,0.06);
+                transition: border-color 0.15s, background 0.15s;
+                margin-bottom: 12px;
+            }
+
+            .file-card:hover {
+                border-color: rgba(59,130,246,0.45);
+                background: rgba(59,130,246,0.06);
+            }
+
+            .file-top {
+                display: flex;
+                align-items: flex-start;
+                justify-content: space-between;
+                gap: 12px;
+            }
+
+            .file-path {
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                font-size: 13px;
+                color: var(--text);
+                text-decoration: none;
+            }
+
+            .file-path:hover {
+                text-decoration: underline;
+            }
+
+            .file-score {
+                flex-shrink: 0;
+                font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                font-size: 12px;
+                color: var(--text-3);
+            }
+
+            .file-why {
+                margin-top: 10px;
+                display: flex;
+                flex-wrap: wrap;
+                gap: 6px;
+                align-items: center;
+                color: var(--text-2);
+                font-size: 12px;
+            }
+
+            .word-pill {
+                display: inline-flex;
+                align-items: center;
+                padding: 3px 8px;
+                border-radius: 999px;
+                border: 1px solid rgba(255,255,255,0.10);
+                background: rgba(17,17,19,0.65);
+                color: var(--text);
+                font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                font-size: 11px;
+                max-width: 340px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .file-occ {
+                margin-top: 12px;
+                border-top: 1px solid rgba(255,255,255,0.06);
+                padding-top: 12px;
+                display: flex;
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .occ-line {
+                display: flex;
+                gap: 10px;
+                align-items: baseline;
+                padding: 8px 10px;
+                border-radius: 10px;
+                background: rgba(0,0,0,0.18);
+                border: 1px solid rgba(255,255,255,0.06);
+                cursor: pointer;
+                transition: background 0.15s, border-color 0.15s;
+            }
+
+            .occ-line:hover {
+                background: rgba(0,0,0,0.24);
+                border-color: rgba(255,255,255,0.10);
+            }
+
+            .occ-no {
+                flex-shrink: 0;
+                color: var(--text-3);
+                font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                font-size: 12px;
+                min-width: 64px;
+                text-align: right;
+            }
+
+            .occ-text {
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                color: var(--text);
+                font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                font-size: 12px;
+            }
+
+            .file-actions {
+                margin-top: 12px;
+                display: flex;
+                gap: 10px;
+                align-items: center;
+                flex-wrap: wrap;
+            }
+
+            .mini-link {
+                color: var(--text-2);
+                text-decoration: none;
+                font-size: 12px;
+                padding: 6px 10px;
+                border-radius: 10px;
+                border: 1px solid rgba(255,255,255,0.08);
+                background: rgba(255,255,255,0.02);
+            }
+
+            .mini-link:hover {
+                color: var(--text);
+                border-color: rgba(59,130,246,0.35);
+                background: rgba(59,130,246,0.06);
+            }
+
+            .outline-box {
+                margin-top: 10px;
+                border: 1px solid rgba(255,255,255,0.08);
+                border-radius: 12px;
+                background: rgba(17, 17, 19, 0.65);
+                overflow: hidden;
+            }
+
+            .outline-head {
+                padding: 10px 12px;
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                border-bottom: 1px solid rgba(255,255,255,0.06);
+            }
+
+            .outline-title {
+                font-size: 12px;
+                color: var(--text-2);
+                font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .outline-body {
+                padding: 10px 12px;
+            }
+
+            .outline-item {
+                display: flex;
+                justify-content: space-between;
+                gap: 12px;
+                align-items: baseline;
+                padding: 6px 8px;
+                border-radius: 10px;
+                border: 1px solid transparent;
+                cursor: pointer;
+            }
+
+            .outline-item:hover {
+                border-color: rgba(255,255,255,0.08);
+                background: rgba(255,255,255,0.03);
+            }
+
+            .outline-name {
+                min-width: 0;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                font-size: 12px;
+                color: var(--text);
+            }
+
+            .outline-loc {
+                flex-shrink: 0;
+                font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                font-size: 11px;
+                color: var(--text-3);
+            }
         
         .result-list {
             list-style: none;
@@ -984,44 +1185,41 @@ HTML_PAGE = '''<!DOCTYPE html>
                     </aside>
 
                     <main class="main">
-		                <p class="subtitle" style="margin-top: 4px;">Semantic Knowledge Explorer</p>
-                        <div class="hint">
-                            Select a document to filter σ-edges. Hover <span style="color:var(--success);font-weight:600;">σ</span> results to preview source context and open the file.
-                        </div>
+			                <p class="subtitle" style="margin-top: 4px;">Locate files</p>
+	                        <div class="hint">
+	                            Paste an error, stack trace, or symbol → get ranked files. Use Outline to see structure before reading full content.
+	                        </div>
 
                 <!-- Mode Tabs -->
-                <div class="mode-tabs">
-                    <button class="mode-tab active" data-mode="search" onclick="setMode('search')">Explore</button>
-                    <button class="mode-tab" data-mode="verify" onclick="setMode('verify')">Verify</button>
-                    <button class="mode-tab" data-mode="conflicts" onclick="setMode('conflicts')">Conflicts</button>
-                </div>
+	                <div class="mode-tabs">
+	                    <button class="mode-tab active" data-mode="search" onclick="setMode('search')">Locate</button>
+	                    <button class="mode-tab" data-mode="verify" onclick="setMode('verify')">Verify</button>
+	                    <button class="mode-tab" data-mode="conflicts" onclick="setMode('conflicts')">Conflicts</button>
+	                </div>
 
                 <!-- Legend -->
-                <div class="legend">
-                    <div class="legend-item"><span class="legend-dot sigma"></span> σ = observation (documents)</div>
-                    <div class="legend-item"><span class="legend-dot alpha"></span> α = context (crystal)</div>
-                    <div class="legend-item"><span class="legend-dot lambda"></span> λ = navigation (ghost)</div>
-                    <div class="legend-item"><span class="legend-dot eta"></span> η = hypothesis (unverified)</div>
-                </div>
+	                <div class="legend">
+	                    <div class="legend-item"><span class="legend-dot alpha"></span> Ranked files • Score = 2^(unique matched terms) • Click a line to preview/open</div>
+	                </div>
 		        
 		        <!-- Mode: Search -->
                 <div class="mode-panel active" id="panel-search">
 		            <div class="search-form">
 	                    <div class="search-wrapper">
-	                        <input type="text" class="search-input" id="query" 
-	                               placeholder="Type to search... (suggestions will appear)" autofocus
-                               oninput="handleInput(this.value)" autocomplete="off">
+		                        <input type="text" class="search-input" id="query" 
+		                               placeholder="Paste issue text / error / symbol (e.g. separability_matrix)" autofocus
+		                               oninput="handleInput(this.value)" autocomplete="off">
                         <div class="autocomplete" id="autocomplete"></div>
                     </div>
                     <button class="btn" id="searchBtn" onclick="search()">Search</button>
                 </div>
         
-                <div id="content">
-                    <div class="empty">
-                        <h3>Enter a word to explore</h3>
-                        <p>See semantic connections from your documents + global knowledge</p>
-                    </div>
-                </div>
+	                <div id="content">
+	                    <div class="empty">
+	                        <h3>Paste an error or symbol</h3>
+	                        <p>Get a ranked list of files + previews showing why they match</p>
+	                    </div>
+	                </div>
                 </div>
 
                 <!-- Mode: Verify -->
@@ -1669,12 +1867,12 @@ HTML_PAGE = '''<!DOCTYPE html>
             searchBtn.disabled = true;
             content.innerHTML = '<div class="loading"><span class="spinner"></span>Searching...</div>';
             
-	            try {
-	                let url = '/api/search?q=' + encodeURIComponent(q);
-	                if (selectedDoc) {
-	                    url += '&doc=' + encodeURIComponent(selectedDoc);
-	                }
-	                const res = await fetch(url);
+		            try {
+		                let url = '/api/locate?q=' + encodeURIComponent(q);
+		                if (selectedDoc) {
+		                    url += '&doc=' + encodeURIComponent(selectedDoc);
+		                }
+		                const res = await fetch(url);
 	                const data = await res.json();
 	                
 	                if (data.error) {
@@ -1690,178 +1888,212 @@ HTML_PAGE = '''<!DOCTYPE html>
             }
         }
         
-	        function renderResults(data) {
-	            if (!data.neighbors || data.neighbors.length === 0) {
-	                content.innerHTML = '<div class="empty"><h3>No connections found</h3><p>Try a different word</p></div>';
-	                return;
-	            }
-	            
-		            const localCount = data.neighbors.filter(n => n.source === 'local').length;
-		            const globalCount = data.neighbors.length - localCount;
-                    const ringCounts = { sigma: 0, lambda: 0, eta: 0, alpha: 0 };
-                    data.neighbors.forEach(n => {
-                        const r = String(n.ring || (n.source === 'local' ? 'sigma' : 'alpha'));
-                        if (ringCounts[r] == null) ringCounts[r] = 0;
-                        ringCounts[r] += 1;
-                    });
-                    const ringParts = [];
-                    if (ringCounts.sigma) ringParts.push('σ ' + ringCounts.sigma);
-                    if (ringCounts.lambda) ringParts.push('λ ' + ringCounts.lambda);
-                    if (ringCounts.eta) ringParts.push('η ' + ringCounts.eta);
-                    ringParts.push('α ' + ringCounts.alpha);
-                    const ringSummary = ringParts.join(' • ');
-		            const focus = Array.isArray(data.atoms) && data.atoms.length ? data.atoms[0] : '';
-	            
-	            let miniSrc = '/graph3d?embed=1';
-	            if (selectedDoc) miniSrc += '&doc=' + encodeURIComponent(selectedDoc);
-	            if (focus) miniSrc += '&focus=' + encodeURIComponent(focus) + '&radius=1&max_nodes=180';
-                miniSrc += '&labels=' + (miniLabels ? '1' : '0');
-	            
-	            let fullHref = '/graph3d';
-	            const qs = [];
-	            if (selectedDoc) qs.push('doc=' + encodeURIComponent(selectedDoc));
-	            if (focus) qs.push('focus=' + encodeURIComponent(focus) + '&radius=2');
-                qs.push('labels=' + (miniLabels ? '1' : '0'));
-	            if (qs.length) fullHref += '?' + qs.join('&');
-	            
-	            let html = `
-	                <div class="results">
-	                    <div class="result-header">
-	                        <h2>
-	                            ${data.phase === 'solid' ? '◆' : '○'} "${escHtml(data.query)}"
-	                            <span class="phase-badge ${data.phase}">${data.phase === 'solid' ? 'ANCHOR' : 'common'}</span>
-	                        </h2>
-	                        <div class="result-meta">
-	                            <span>Mode: ${data.mode}</span>
-	                            <span>Mass: ${(data.mass || 0).toFixed(2)}</span>
-                                <span>Doc: ${selectedDoc ? escHtml(selectedDoc) : 'all'}</span>
-	                            <span>${ringSummary}</span>
-	                        </div>
-	                    </div>
-	                    <div class="graph-preview">
-	                        <div class="graph-preview-header">
-	                            <span>3D molecule (overlay: ${selectedDoc ? escHtml(selectedDoc) : 'all'})</span>
-                                <div class="graph-preview-actions">
-                                    <button class="mini-btn ${miniLabels ? 'active' : ''}" id="miniLabelsBtn" onclick="toggleMiniLabels()">Labels</button>
-	                                <a id="fullGraphLink" href="${fullHref}" target="_blank">Open full</a>
-                                </div>
-	                        </div>
-	                        <iframe id="miniGraphFrame" class="graph-frame" src="${miniSrc}"></iframe>
-	                    </div>
-                        <div class="mentions" id="mentions">
-                            <div class="mentions-header">
-                                <div class="mentions-title">Mentions (σ)</div>
-                                <div class="mentions-meta" id="mentionsMeta">—</div>
-                            </div>
-                            <div class="mentions-body">
-                                <div class="mentions-actions">
-                                    <button class="mini-btn" id="mentionsScanBtn" type="button">Scan all docs</button>
-                                    <span style="color:var(--text-3);font-size:12px;">Click a mention to preview context</span>
-                                </div>
-                                <div id="mentionsBody"><div class="tree-empty">Select a document (left) to see uses, or scan all documents.</div></div>
-                                <div id="mentionsContext" class="context-panel" style="display:none;"></div>
-                            </div>
-                        </div>
-	            `;
-            
-            // Group by orbit (physics from INVARIANTS.md)
-            const core = data.neighbors.filter(n => Math.abs(n.weight) >= 0.7);
-            const near = data.neighbors.filter(n => Math.abs(n.weight) >= 0.5 && Math.abs(n.weight) < 0.7);
-            const far = data.neighbors.filter(n => Math.abs(n.weight) < 0.5);
-            
-	            const renderGroup = (items, title, color) => {
-	                if (items.length === 0) return '';
-	                let group = `<div class="orbit-group"><h4 style="color:${color}">${title} (${items.length})</h4><ul class="result-list">`;
-	                items.slice(0, 15).forEach(n => {
-	                    const isLocal = n.source === 'local';
-	                    const label = n.label || 'unknown';
-	                    const labelText = escHtml(label);
-                        const labelKey = encodeURIComponent(label);
-	                    const weight = (n.weight * 100).toFixed(0) + '%';
-                        const ring = String(n.ring || (isLocal ? 'sigma' : 'alpha'));
-                        const ringLabel =
-                            ring === 'sigma' ? 'σ' :
-                            ring === 'lambda' ? 'λ' :
-                            ring === 'eta' ? 'η' :
-                            'α';
-                        const ringTitle =
-                            ring === 'sigma' ? 'σ: documentary observation (can prove with provenance)' :
-                            ring === 'lambda' ? 'λ: derived/ghost edge (navigation, not proof)' :
-                            ring === 'eta' ? 'η: hypothesis (unverified)' :
-                            'α: global crystal context (not proof)';
-                        const badgeClass =
-                            ring === 'sigma' ? 'badge-sigma' :
-                            ring === 'lambda' ? 'badge-lambda' :
-                            ring === 'eta' ? 'badge-eta' :
-                            'badge-alpha';
-	                    const badge = `<span class="badge ${badgeClass}" title="${escHtml(ringTitle)}">${ringLabel}</span>`;
-	                    
-	                    // Build location info with a non-truncated line number.
-	                    const docStr = n.doc ? String(n.doc) : '';
-	                    const lineStr = (n.line != null) ? String(n.line) : '';
-	                    let locHtml = '';
-	                    if (docStr && lineStr) {
-	                        locHtml = `<span class="result-loc" title="${escHtml(docStr + ':' + lineStr)}"><span class="loc-file">${escHtml(docStr)}</span><span class="loc-line">:${escHtml(lineStr)}</span></span>`;
-	                    } else if (docStr) {
-	                        locHtml = `<span class="result-loc" title="${escHtml(docStr)}">${escHtml(docStr)}</span>`;
-	                    }
-	                    
-	                    let tooltip = ringTitle;
-	                    
-	                    // Add data attributes for lazy context loading
-	                    const dataAttrs = (n.doc && n.line) 
-	                        ? `data-doc="${escHtml(n.doc)}" data-line="${n.line}" data-ctx-hash="${escHtml(n.ctx_hash || '')}"`
-	                        : '';
-	                    
-	                    group += `
-	                        <li class="result-item ${isLocal ? 'local' : ''} ring-${ring}" 
-                                data-word="${labelKey}"
-	                            title="${escHtml(tooltip)}"
-	                            ${dataAttrs}>
-	                            <span class="result-word">${labelText}</span>
-                                ${locHtml}
-	                            <span class="result-weight">${weight}</span>
-	                            ${badge}
-	                        </li>
-	                    `;
-	                });
-	                group += '</ul></div>';
-	                return group;
-	            };
-            
-            html += renderGroup(core, '◼ Core (synonyms, 70%+)', 'var(--accent)');
-            html += renderGroup(near, '◻ Near (associations, 50-70%)', 'var(--text-2)');
-            html += renderGroup(far, '○ Far (context, <50%)', 'var(--text-3)');
-            
-	            html += '</div>';
-	            content.innerHTML = html;
+		        let outlineCache = {};
 
-                // Click handlers (avoid inline JS quoting issues)
-                document.querySelectorAll('.result-item').forEach(item => {
-                    item.addEventListener('click', () => {
-                        const w = safeDecode(item.dataset.word || '');
-                        if (w) searchWord(w);
-                    });
-                });
-	            
-		            // Add hover handlers for lazy context loading
-		            document.querySelectorAll('.result-item.local').forEach(item => {
-		                item.addEventListener('mouseenter', async (e) => {
-		                    const doc = item.dataset.doc;
-		                    const line = item.dataset.line;
-	                        const ctxHash = item.dataset.ctxHash;
-                                const wEl = item.querySelector('.result-word');
-	                            const word = safeDecode(item.dataset.word || '') || (wEl ? (wEl.textContent || '') : '');
-                            const query = String(data.query || queryInput.value || '').trim();
-		                    if (doc && line) {
-		                        await showContext(item, doc, line, ctxHash, word, query);
+		        async function loadOutline(doc) {
+		            const key = String(doc || '');
+		            if (!key) return null;
+		            if (outlineCache[key]) return outlineCache[key];
+		            try {
+		                const res = await fetch('/api/structure?doc=' + encodeURIComponent(key));
+		                const data = await res.json();
+		                outlineCache[key] = data || {};
+		                return outlineCache[key];
+		            } catch (e) {
+		                outlineCache[key] = { error: 'Could not load outline' };
+		                return outlineCache[key];
+		            }
+		        }
+
+		        function renderOutlineHtml(doc, outline) {
+		            if (!outline || outline.error) {
+		                return '<div class="outline-box"><div class="outline-head"><div class="outline-title">Outline</div></div><div class="outline-body" style="color:var(--danger);font-size:12px;">' + escHtml(outline && outline.error ? outline.error : 'Error') + '</div></div>';
+		            }
+		            const items = Array.isArray(outline.items) ? outline.items : [];
+		            if (!items.length) {
+		                return '<div class="outline-box"><div class="outline-head"><div class="outline-title">Outline</div></div><div class="outline-body" style="color:var(--text-2);font-size:12px;">No structure found.</div></div>';
+		            }
+		            let body = '';
+		            items.slice(0, 120).forEach(it => {
+		                const line = Number(it.line || 0) || 0;
+		                const end = Number(it.end_line || line) || line;
+		                const name = String(it.name || '').trim();
+		                const typ = String(it.type || '').trim();
+		                if (!name || !line) return;
+		                body += `
+		                    <div class="outline-item" data-doc="${escHtml(doc)}" data-line="${line}">
+		                        <div class="outline-name">${escHtml(typ ? (typ + ' ' + name) : name)}</div>
+		                        <div class="outline-loc">${escHtml(line + (end && end !== line ? ('-' + end) : ''))}</div>
+		                    </div>
+		                `;
+		            });
+		            return `
+		                <div class="outline-box">
+		                    <div class="outline-head">
+		                        <div class="outline-title">Outline</div>
+		                        <div style="color:var(--text-3);font-size:11px;font-family:'JetBrains Mono',ui-monospace,monospace;">${escHtml(String(outline.language || outline.suffix || ''))}</div>
+		                    </div>
+		                    <div class="outline-body">${body}</div>
+		                </div>
+		            `;
+		        }
+
+		        function renderResults(data) {
+		            const results = Array.isArray(data.results) ? data.results : [];
+		            if (!results.length) {
+		                content.innerHTML = '<div class="empty"><h3>No files found</h3><p>Try adding more specific terms from the issue (function/class/module names)</p></div>';
+		                return;
+		            }
+
+		            const q = String(data.query || queryInput.value || '').trim();
+		            const scope = selectedDoc ? selectedDoc : 'all';
+
+		            let html = `
+		                <div class="results">
+		                    <div class="result-header">
+		                        <h2>📄 Files for "${escHtml(q)}"</h2>
+		                        <div class="result-meta">
+		                            <span>Files: ${results.length}</span>
+		                            <span>Scope: ${escHtml(scope)}</span>
+		                        </div>
+		                    </div>
+		            `;
+
+		            results.slice(0, 30).forEach(r => {
+		                const doc = String(r.file || '').trim();
+		                if (!doc) return;
+		                const score = Number(r.score || 0) || 0;
+		                const nMatches = Number(r.n_matches || (Array.isArray(r.matching_words) ? r.matching_words.length : 0)) || 0;
+		                const words = Array.isArray(r.matching_words) ? r.matching_words : [];
+		                const occ = Array.isArray(r.occurrences) ? r.occurrences : [];
+		                const docHref = '/doc?doc=' + encodeURIComponent(doc) + (q ? ('&q=' + encodeURIComponent(q)) : '');
+		                const graphHref = '/graph3d?doc=' + encodeURIComponent(doc) + '&radius=2';
+
+		                let pills = '';
+		                words.slice(0, 12).forEach(w => {
+		                    pills += `<span class="word-pill" title="${escHtml(String(w))}">${escHtml(String(w))}</span>`;
+		                });
+
+		                let occHtml = '';
+		                if (occ.length) {
+		                    let lines = '';
+		                    occ.slice(0, 8).forEach(o => {
+		                        const lineNo = Number(o.line || 0) || 0;
+		                        const contentText = String(o.content || '').trim();
+		                        const matches = Array.isArray(o.matches) ? o.matches : [];
+		                        const anchor = matches.length ? matches[0] : (words.length ? words[0] : '');
+		                        if (!lineNo) return;
+		                        lines += `
+		                            <div class="occ-line" data-doc="${escHtml(doc)}" data-line="${lineNo}" data-word="${escHtml(anchor)}">
+		                                <div class="occ-no">${escHtml(String(lineNo))}</div>
+		                                <div class="occ-text">${escHtml(contentText)}</div>
+		                            </div>
+		                        `;
+		                    });
+		                    occHtml = `<div class="file-occ">${lines}</div>`;
+		                }
+
+		                html += `
+		                    <div class="file-card" data-doc="${escHtml(doc)}">
+		                        <div class="file-top">
+		                            <a class="file-path" href="${docHref}">📄 ${escHtml(doc)}</a>
+		                            <div class="file-score">score ${escHtml(String(score))} • ${escHtml(String(nMatches))} terms</div>
+		                        </div>
+		                        <div class="file-why">
+		                            <span style="color:var(--text-3);">Matched:</span>
+		                            ${pills || '<span style="color:var(--text-3);">—</span>'}
+		                        </div>
+		                        ${occHtml}
+		                        <div class="file-actions">
+		                            <button class="mini-btn" type="button" data-action="outline" data-doc="${escHtml(doc)}">Outline</button>
+		                            <button class="mini-btn" type="button" data-action="vscode" data-doc="${escHtml(doc)}">VS Code</button>
+		                            <button class="mini-btn" type="button" data-action="open" data-doc="${escHtml(doc)}">Open</button>
+		                            <a class="mini-link" href="${graphHref}" target="_blank">Graph</a>
+		                            <a class="mini-link" href="${docHref}">File page</a>
+		                        </div>
+		                        <div class="outline-slot" data-doc="${escHtml(doc)}"></div>
+		                    </div>
+		                `;
+		            });
+
+		            html += '</div>';
+		            content.innerHTML = html;
+
+		            // File action handlers
+		            document.querySelectorAll('button[data-action]').forEach(btn => {
+		                btn.addEventListener('click', async (e) => {
+		                    e.preventDefault();
+		                    e.stopPropagation();
+		                    const doc = String(btn.dataset.doc || '');
+		                    const action = String(btn.dataset.action || '');
+		                    if (!doc) return;
+		                    setSelectedDoc(doc);
+		                    const card = btn.closest('.file-card');
+		                    if (!card) return;
+
+		                    // Prefer first occurrence line if present.
+		                    let line = 1;
+		                    const firstOcc = card.querySelector('.occ-line');
+		                    if (firstOcc && firstOcc.dataset && firstOcc.dataset.line) {
+		                        const n = Number(firstOcc.dataset.line || 1) || 1;
+		                        line = n;
+		                    }
+
+		                    if (action === 'vscode') {
+		                        await openDoc('vscode', doc, line, '');
+		                        return;
+		                    }
+		                    if (action === 'open') {
+		                        await openDoc('open', doc, line, '');
+		                        return;
+		                    }
+		                    if (action === 'outline') {
+		                        const slot = card.querySelector('.outline-slot');
+		                        if (!slot) return;
+		                        if (slot.dataset && slot.dataset.open === '1') {
+		                            slot.innerHTML = '';
+		                            slot.dataset.open = '0';
+		                            return;
+		                        }
+		                        slot.dataset.open = '1';
+		                        slot.innerHTML = '<div class="loading" style="padding:16px 0;"><span class="spinner"></span>Loading outline...</div>';
+		                        const outline = await loadOutline(doc);
+		                        slot.innerHTML = renderOutlineHtml(doc, outline);
+		                        slot.querySelectorAll('.outline-item').forEach(item => {
+		                            item.addEventListener('click', async (ev) => {
+		                                ev.preventDefault();
+		                                ev.stopPropagation();
+		                                const ln = Number(item.dataset.line || 1) || 1;
+		                                await openDoc('vscode', doc, ln, '');
+		                            });
+		                        });
+		                        return;
 		                    }
 		                });
 		            });
 
-                    // Mentions: where this concept appears in σ sources (doc/line).
-                    setupMentions(data);
-	        }
+		            // Occurrence hover/click: preview + open
+		            document.querySelectorAll('.occ-line').forEach(el => {
+		                el.addEventListener('mouseenter', async () => {
+		                    const doc = el.dataset.doc;
+		                    const line = el.dataset.line;
+		                    const word = el.dataset.word || '';
+		                    if (doc && line) {
+		                        await showContext(el, doc, line, '', word, q);
+		                    }
+		                });
+		                el.addEventListener('click', async (e) => {
+		                    e.preventDefault();
+		                    e.stopPropagation();
+		                    const doc = el.dataset.doc;
+		                    const line = Number(el.dataset.line || 1) || 1;
+		                    if (doc) {
+		                        setSelectedDoc(doc);
+		                        await openDoc('vscode', doc, line, '');
+		                    }
+		                });
+		            });
+		        }
         
 	        let contextCache = {};
 	        let contextTooltip = null;
