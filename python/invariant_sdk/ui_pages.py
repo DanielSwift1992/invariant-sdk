@@ -2614,7 +2614,7 @@ HTML_PAGE = '''<!DOCTYPE html>
 
                 const ctxLines = Array.isArray(ctx.lines)
                     ? ctx.lines
-                    : (ctx.content ? String(ctx.content).split('\n') : []);
+                    : (ctx.content ? String(ctx.content).split('\\n') : []);
 
                 const ns = normalizeNeedles(needles);
                 const activeIdx = Math.max(0, Math.min(ctxLines.length - 1, (actualLine || requestedLine || 1) - blockStart));
