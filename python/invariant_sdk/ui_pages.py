@@ -622,6 +622,7 @@ HTML_PAGE = '''<!DOCTYPE html>
             .word-pill {
                 display: inline-flex;
                 align-items: center;
+                gap: 4px;
                 padding: 3px 8px;
                 border-radius: 999px;
                 border: 1px solid rgba(255,255,255,0.10);
@@ -633,6 +634,98 @@ HTML_PAGE = '''<!DOCTYPE html>
                 overflow: hidden;
                 text-overflow: ellipsis;
                 white-space: nowrap;
+                position: relative;
+                --pct: 0;
+                transition: all 0.15s ease;
+            }
+
+            .word-pill::before {
+                content: "";
+                position: absolute;
+                left: 8px;
+                right: 8px;
+                bottom: 2px;
+                height: 2px;
+                border-radius: 999px;
+                background: rgba(99, 179, 237, 0.12);
+                overflow: hidden;
+            }
+
+            .word-pill::after {
+                content: "";
+                position: absolute;
+                left: 8px;
+                bottom: 2px;
+                height: 2px;
+                width: calc(var(--pct, 0) * 1%);
+                border-radius: 999px;
+                background: rgba(99, 179, 237, 0.85);
+            }
+
+            .word-pill.signal {
+                border-color: rgba(99, 179, 237, 0.4);
+                background: rgba(59, 130, 246, 0.15);
+            }
+
+            .word-pill.noise {
+                border-color: rgba(255,255,255,0.06);
+                background: rgba(17,17,19,0.4);
+                color: var(--text-2);
+            }
+
+            .word-pill .pct {
+                font-size: 9px;
+                color: rgba(99, 179, 237, 0.8);
+                font-weight: 600;
+            }
+
+            .word-pill.noise .pct {
+                color: var(--text-3);
+            }
+
+            .word-pill .src {
+                font-size: 9px;
+                color: rgba(255,255,255,0.36);
+                font-weight: 600;
+            }
+
+            .noise-details {
+                display: inline-flex;
+                align-items: center;
+            }
+
+            .noise-summary {
+                list-style: none;
+                cursor: pointer;
+                padding: 3px 8px;
+                border-radius: 999px;
+                border: 1px solid rgba(255,255,255,0.10);
+                background: rgba(17,17,19,0.55);
+                color: var(--text-3);
+                font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                font-size: 11px;
+            }
+
+            .noise-summary:hover {
+                border-color: rgba(255,255,255,0.18);
+                color: var(--text-2);
+            }
+
+            .noise-details[open] .noise-summary {
+                border-color: rgba(255,255,255,0.18);
+                color: var(--text-2);
+            }
+
+            .noise-summary::-webkit-details-marker {
+                display: none;
+            }
+
+            .noise-list {
+                margin-left: 8px;
+                display: inline-flex;
+                flex-wrap: wrap;
+                gap: 6px;
+                align-items: center;
             }
 
             .file-occ {
@@ -1321,7 +1414,7 @@ HTML_PAGE = '''<!DOCTYPE html>
                                 <input type="file" id="fileInput" accept=".txt,.md" onchange="uploadFile(this)">
                                 <p>📄 Drag file here or click to upload</p>
                                 <p style="font-size: 12px; color: var(--text-3); margin-top: 8px;">
-                                    Supports .txt and .md files (up to 500 unique words will be indexed)
+                                    Supports .txt and .md files (words indexed via Condensation Law)
                                 </p>
                             </div>
                         </div>
@@ -2199,19 +2292,58 @@ HTML_PAGE = '''<!DOCTYPE html>
 		                const docHref = '/doc?doc=' + encodeURIComponent(doc) + (q ? ('&q=' + encodeURIComponent(q)) : '');
 		                const graphHref = '/graph3d?doc=' + encodeURIComponent(doc) + '&radius=2';
 
+		                // Render word pills as an "attention spectrum" (Observation Law).
+		                const contributions = Array.isArray(r.word_contributions) ? r.word_contributions : [];
+		                const uniformThreshold = contributions.length > 0 ? (100 / contributions.length) : 0;
+		                const signalWords = Array.isArray(r.signal_words)
+		                    ? r.signal_words
+		                    : contributions
+		                        .filter(wc => Number(wc.percent || 0) >= uniformThreshold)
+		                        .map(wc => wc.word);
+
 		                let pills = '';
-		                words.slice(0, 12).forEach(w => {
-		                    pills += `<span class="word-pill" title="${escHtml(String(w))}">${escHtml(String(w))}</span>`;
-		                });
+		                if (contributions.length > 0) {
+		                    const signal = contributions.filter(wc => Number(wc.percent || 0) >= uniformThreshold);
+		                    const noise = contributions.filter(wc => Number(wc.percent || 0) < uniformThreshold);
+
+		                    const renderPill = (wc, kind) => {
+		                        const word = String(wc.word || '').trim();
+		                        if (!word) return '';
+		                        const pct = Number(wc.percent || 0);
+		                        const isDirect = !!wc.is_direct;
+		                        const src = String(wc.source_word || '').trim();
+		                        const cls = (kind === 'signal') ? 'word-pill signal' : 'word-pill noise';
+		                        const titleBits = [`${word}: ${pct.toFixed(1)}%`];
+		                        if (!isDirect && src && src !== word) titleBits.push(`from ${src}`);
+		                        const srcHtml = (!isDirect && src && src !== word) ? `<span class="src">↝${escHtml(src)}</span>` : '';
+		                        return `<span class="${cls}" title="${escHtml(titleBits.join(' • '))}" style="--pct:${pct};">${escHtml(word)}<span class="pct">${escHtml(pct.toFixed(1) + '%')}</span>${srcHtml}</span>`;
+		                    };
+
+		                    pills += signal.map(wc => renderPill(wc, 'signal')).join('');
+		                    if (noise.length) {
+		                        pills += `
+		                            <details class="noise-details">
+		                                <summary class="noise-summary">+${noise.length} noise</summary>
+		                                <div class="noise-list">${noise.map(wc => renderPill(wc, 'noise')).join('')}</div>
+		                            </details>
+		                        `;
+		                    }
+		                } else {
+		                    // Fallback to simple word list (legacy engine)
+		                    (words || []).forEach(w => {
+		                        pills += `<span class="word-pill" title="${escHtml(String(w))}">${escHtml(String(w))}</span>`;
+		                    });
+		                }
 
 		                let occHtml = '';
 		                if (occ.length) {
 		                    let lines = '';
-		                    occ.slice(0, 8).forEach(o => {
+		                    occ.forEach(o => {
 		                        const lineNo = Number(o.line || 0) || 0;
 		                        const contentText = String(o.content || '').trim();
 		                        const matches = Array.isArray(o.matches) ? o.matches : [];
-		                        const needles = normalizeNeedles(matches.length ? matches : words);
+		                        // Only highlight signal words (above 1/N baseline).
+		                        const needles = normalizeNeedles(matches.length ? matches : (signalWords.length ? signalWords : words));
 		                        const primary = pickPrimaryNeedle(contentText, needles);
 		                        const lineHtml = highlightLineHtml(contentText, needles, primary);
 		                        const needlesEnc = encodeURIComponent(JSON.stringify(needles || []));
@@ -2231,7 +2363,7 @@ HTML_PAGE = '''<!DOCTYPE html>
 		                    <div class="file-card" data-doc="${escHtml(doc)}">
 		                        <div class="file-top">
 		                            <a class="file-path" href="${docHref}">📄 ${escHtml(doc)}</a>
-		                            <div class="file-score">score ${escHtml(String(score))} • ${escHtml(String(nMatches))} terms</div>
+		                            <div class="file-score">score ${escHtml(Number.isFinite(score) ? score.toFixed(3) : String(score))} • ${escHtml(String(nMatches))} terms</div>
 		                        </div>
 		                        <div class="file-why">
 		                            <span style="color:var(--text-3);">Matched:</span>

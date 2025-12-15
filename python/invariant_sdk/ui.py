@@ -188,6 +188,7 @@ class UIHandler(BaseHTTPRequestHandler):
             q,
             overlay=overlay,
             index=idx,
+            physics=UIHandler.physics,  # Enable Query Lensing!
             doc_filter=doc_filter,
             max_results=max_results,
             preview_files=10,
@@ -334,6 +335,7 @@ class UIHandler(BaseHTTPRequestHandler):
                 q,
                 overlay=overlay,
                 index=idx,
+                physics=UIHandler.physics,  # Enable Query Lensing!
                 doc_filter=doc,
                 max_results=1,
                 preview_files=1,
@@ -343,7 +345,8 @@ class UIHandler(BaseHTTPRequestHandler):
             res = (hit.get("results") or [])
             if res:
                 r0 = res[0]
-                matches_words = list(r0.get("matching_words") or [])
+                signal_words = list(r0.get("signal_words") or [])
+                matches_words = signal_words or list(r0.get("matching_words") or [])
                 occurrences = list(r0.get("occurrences") or [])
                 if occurrences:
                     try:
@@ -1246,7 +1249,7 @@ class UIHandler(BaseHTTPRequestHandler):
             tokens = tokenize_with_lines(text)
             
             words = [w for (w, _ln) in tokens]
-            unique_words = list(dict.fromkeys(words))[:500]  # limit network + processing
+            unique_words = list(dict.fromkeys(words))  # L0: Full observation, Crystal decides Solid vs Gas
             
             # Find anchors using single BATCH API call (O(1) network round-trip)
             # Server now properly supports limit=0 for meta-only checks
@@ -1261,7 +1264,7 @@ class UIHandler(BaseHTTPRequestHandler):
             
             # Mass filter (INVARIANTS.md): keep Solid anchors (mass > mean_mass)
             mean_mass = physics.mean_mass
-            candidates: list[tuple[str, str, float]] = []
+            candidates: list[tuple[str, str, float, int, bool]] = []
             for word in unique_words:
                 h8 = word_to_hash.get(word)
                 if not h8:
@@ -1270,7 +1273,7 @@ class UIHandler(BaseHTTPRequestHandler):
                 if not result.get('exists'):
                     # Unknown words are local anchors (σ) by definition.
                     # Treat as high-mass so they survive the phase boundary.
-                    candidates.append((word, h8, 1.0))
+                    candidates.append((word, h8, 1.0, 0, False))
                     continue
                 meta = result.get('meta') or {}
                 try:
@@ -1278,20 +1281,48 @@ class UIHandler(BaseHTTPRequestHandler):
                 except Exception:
                     degree_total = 0
                 try:
-                    mass = 1.0 / math.log(2 + max(0, degree_total))
+                    mass = 1.0 / math.log(2 + max(0, degree_total)) if degree_total > 0 else 0.0
                 except Exception:
                     mass = 0.0
-                candidates.append((word, h8, mass))
+                candidates.append((word, h8, mass, degree_total, True))
             
-            solid = [(w, h8) for (w, h8, m) in candidates if m > mean_mass]
+            # === LAW OF CONDENSATION (INVARIANTS V.1) ===
+            # Phase = Solid iff Mass_α > μ_mass OR TF_local > TF_crit
+            from collections import Counter
             
-            # Fallback: if too few anchors, take top-N by mass (preserve original order).
+            # 1. Global Mass criterion (α-classification)
+            solid_by_mass = {(w, h8) for (w, h8, m, _deg, _exists) in candidates if m > mean_mass}
+
+            # 2. Local TF criterion (σ-observation / Condensation)
+            # Define critical pressure as the mean per-type frequency in this document.
+            word_counts = Counter(w for w, _ in tokens)
+            tf_mean = (sum(word_counts.values()) / len(word_counts)) if word_counts else 0.0
+
+            # Exclude LINK/hub words from condensing (Invariant: LINK if degree > √N).
+            n_labels = int((physics.meta or {}).get("n_labels") or 1)
+            link_degree = math.sqrt(max(1, n_labels))
+
+            cand_by_word = {w: (h8, deg, exists) for (w, h8, _m, deg, exists) in candidates}
+            solid_by_tf = {
+                (w, cand_by_word[w][0])
+                for w, count in word_counts.items()
+                if count > tf_mean
+                and w in cand_by_word
+                and (
+                    not cand_by_word[w][2]  # unknown words can condense
+                    or float(cand_by_word[w][1]) <= link_degree
+                )
+            }
+            
+            # 3. Combined: anchor if EITHER criterion is met
+            solid = solid_by_mass | solid_by_tf
+            
             if len(solid) >= 2:
-                anchors = solid
+                anchors = list(solid)
             else:
                 top = sorted(candidates, key=lambda x: x[2], reverse=True)[:64]
-                top_set = {h8 for (_, h8, _) in top}
-                anchors = [(w, h8) for (w, h8, _) in candidates if h8 in top_set]
+                top_set = {h8 for (_w, h8, _m, _deg, _exists) in top}
+                anchors = [(w, h8) for (w, h8, _m, _deg, _exists) in candidates if h8 in top_set]
             
             if len(anchors) < 2:
                 self.send_json({'error': 'Too few concepts found in document'}, 400)
@@ -1419,7 +1450,7 @@ class UIHandler(BaseHTTPRequestHandler):
             tokens = tokenize_with_lines(text)
             
             words = [w for (w, _ln) in tokens]
-            unique_words = list(dict.fromkeys(words))[:500]
+            unique_words = list(dict.fromkeys(words))  # L0: Crystal decides via Phase Separation
             word_to_hash = {w: hash8_hex(f"Ġ{w}") for w in unique_words}
             
             try:
@@ -1429,14 +1460,14 @@ class UIHandler(BaseHTTPRequestHandler):
                 return
             
             mean_mass = physics.mean_mass
-            candidates: list[tuple[str, str, float]] = []
+            candidates: list[tuple[str, str, float, int, bool]] = []
             for word in unique_words:
                 h8 = word_to_hash.get(word)
                 if not h8:
                     continue
                 result = batch_results.get(h8) or {}
                 if not result.get('exists'):
-                    candidates.append((word, h8, 1.0))
+                    candidates.append((word, h8, 1.0, 0, False))
                     continue
                 meta = result.get('meta') or {}
                 try:
@@ -1444,18 +1475,39 @@ class UIHandler(BaseHTTPRequestHandler):
                 except Exception:
                     degree_total = 0
                 try:
-                    mass = 1.0 / math.log(2 + max(0, degree_total))
+                    mass = 1.0 / math.log(2 + max(0, degree_total)) if degree_total > 0 else 0.0
                 except Exception:
                     mass = 0.0
-                candidates.append((word, h8, mass))
+                candidates.append((word, h8, mass, degree_total, True))
             
-            solid = [(w, h8) for (w, h8, m) in candidates if m > mean_mass]
+            # === LAW OF CONDENSATION (INVARIANTS V.1) ===
+            from collections import Counter
+            
+            solid_by_mass = {(w, h8) for (w, h8, m, _deg, _exists) in candidates if m > mean_mass}
+            word_counts = Counter(w for w, _ in tokens)
+            tf_mean = (sum(word_counts.values()) / len(word_counts)) if word_counts else 0.0
+            
+            n_labels = int((physics.meta or {}).get("n_labels") or 1)
+            link_degree = math.sqrt(max(1, n_labels))
+            cand_by_word = {w: (h8, deg, exists) for (w, h8, _m, deg, exists) in candidates}
+            solid_by_tf = {
+                (w, cand_by_word[w][0])
+                for w, count in word_counts.items()
+                if count > tf_mean
+                and w in cand_by_word
+                and (
+                    not cand_by_word[w][2]
+                    or float(cand_by_word[w][1]) <= link_degree
+                )
+            }
+            solid = solid_by_mass | solid_by_tf
+            
             if len(solid) >= 2:
-                anchors = solid
+                anchors = list(solid)
             else:
                 top = sorted(candidates, key=lambda x: x[2], reverse=True)[:64]
-                top_set = {h8 for (_, h8, _) in top}
-                anchors = [(w, h8) for (w, h8, _) in candidates if h8 in top_set]
+                top_set = {h8 for (_w, h8, _m, _deg, _exists) in top}
+                anchors = [(w, h8) for (w, h8, _m, _deg, _exists) in candidates if h8 in top_set]
             
             if len(anchors) < 2:
                 self.send_json({'error': 'Too few concepts found in document'}, 400)

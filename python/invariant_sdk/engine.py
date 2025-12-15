@@ -14,11 +14,15 @@ from __future__ import annotations
 import ast
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Tuple
+from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Sequence, Tuple
 
 from .halo import hash8_hex
 from .overlay import OverlayEdge, OverlayGraph
 from .tokenize import dedupe_preserve_order, tokenize_simple
+
+if TYPE_CHECKING:
+    from .physics import HaloPhysics
+
 
 
 @dataclass(frozen=True)
@@ -41,6 +45,7 @@ class OverlayIndex:
     doc_stats: Dict[str, DocStats]
     known_hashes: set[str]
     label_to_hash: Dict[str, str]
+    hash_to_docs: Dict[str, set[str]]  # For IDF: which docs contain each hash
 
     @classmethod
     def build(cls, overlay: OverlayGraph) -> "OverlayIndex":
@@ -48,6 +53,7 @@ class OverlayIndex:
         known_hashes: set[str] = set(overlay.edges.keys())
         doc_edges: Dict[str, int] = {}
         doc_nodes: Dict[str, set[str]] = {}
+        hash_to_docs: Dict[str, set[str]] = {}  # IDF support
 
         for src, edge_list in overlay.edges.items():
             for edge in edge_list:
@@ -62,6 +68,10 @@ class OverlayIndex:
                         doc_nodes[edge.doc] = s
                     s.add(src)
                     s.add(edge.tgt)
+                    
+                    # Track docs per hash (for IDF scoring)
+                    hash_to_docs.setdefault(src, set()).add(edge.doc)
+                    hash_to_docs.setdefault(edge.tgt, set()).add(edge.doc)
 
         doc_stats: Dict[str, DocStats] = {}
         for doc, edges in doc_edges.items():
@@ -78,7 +88,13 @@ class OverlayIndex:
             # Deterministic tie-break: keep first-seen.
             label_to_hash.setdefault(key, h8)
 
-        return cls(incoming=incoming, doc_stats=doc_stats, known_hashes=known_hashes, label_to_hash=label_to_hash)
+        return cls(
+            incoming=incoming, 
+            doc_stats=doc_stats, 
+            known_hashes=known_hashes, 
+            label_to_hash=label_to_hash,
+            hash_to_docs=hash_to_docs,
+        )
 
 
 def tokenize_query(text: str) -> List[str]:
@@ -116,6 +132,7 @@ def _scan_file_for_words(
     words: Sequence[str],
     max_occurrences: int,
     max_line_len: int = 320,
+    word_weights: Optional[Dict[str, float]] = None,
 ) -> List[Dict]:
     """
     Cheap grep-like preview for top results only (Invariant III).
@@ -131,19 +148,81 @@ def _scan_file_for_words(
 
     needles = [w.strip().lower() for w in words if w and w.strip()]
     needles = [n for n in needles if n]
+    # Dedupe needles while preserving order.
+    if needles:
+        seen = set()
+        deduped = []
+        for n in needles:
+            if n in seen:
+                continue
+            seen.add(n)
+            deduped.append(n)
+        needles = deduped
     if not needles:
         return []
 
-    out: List[Dict] = []
-    for line_no, line in enumerate(text.splitlines(), 1):
-        raw = line.rstrip("\n")
+    needle_weights = {n: float((word_weights or {}).get(n, 1.0)) for n in needles}
+
+    # Collect candidate hit lines with their "energy" and coverage.
+    # Selection prefers lines that cover MORE distinct needles (intersection / bisection),
+    # then higher energy, then earlier line number.
+    lines = text.splitlines()
+    candidates: List[Dict] = []
+    for i, raw_line in enumerate(lines, 1):
+        raw = raw_line.rstrip("\n")
         lower = raw.lower()
         hits = [n for n in needles if n in lower]
         if not hits:
             continue
+        hits_set = set(hits)
+        score = sum(needle_weights.get(n, 0.0) for n in hits_set)
+        candidates.append({"line": i, "hits": sorted(hits_set), "score": score, "coverage": len(hits_set)})
 
-        # Prefer a snippet that actually contains the first match (not always the prefix).
-        # Deterministic: earliest match position; tie-break by longer needle.
+    if not candidates:
+        return []
+
+    candidates.sort(key=lambda c: (-int(c.get("coverage") or 0), -float(c.get("score") or 0.0), int(c.get("line") or 0)))
+
+    needle_set = set(needles)
+    selected: List[Dict] = []
+    covered: set[str] = set()
+    selected_lines: set[int] = set()
+
+    # First pass: pick lines that add new needle coverage (maximizes information gain).
+    for c in candidates:
+        if len(selected) >= max_occurrences:
+            break
+        hits_set = set(c.get("hits") or [])
+        if not hits_set:
+            continue
+        if hits_set - covered:
+            selected.append(c)
+            selected_lines.add(int(c.get("line") or 0))
+            covered |= hits_set
+        if covered == needle_set:
+            break
+
+    # Second pass: fill remaining slots with strongest remaining lines.
+    if len(selected) < max_occurrences:
+        for c in candidates:
+            if len(selected) >= max_occurrences:
+                break
+            line_no = int(c.get("line") or 0)
+            if not line_no or line_no in selected_lines:
+                continue
+            selected.append(c)
+            selected_lines.add(line_no)
+
+    # Render snippets for selected lines only.
+    out: List[Dict] = []
+    for c in selected:
+        line_no = int(c.get("line") or 0)
+        if not line_no or line_no < 1 or line_no > len(lines):
+            continue
+        raw = lines[line_no - 1].rstrip("\n")
+        lower = raw.lower()
+        hits = [str(h) for h in (c.get("hits") or []) if h]
+
         best_pos = None
         best_len = 0
         for n in hits:
@@ -157,7 +236,6 @@ def _scan_file_for_words(
         content = raw
         if max_line_len > 0 and len(content) > max_line_len:
             pos = best_pos or 0
-            # Bias slightly to include some prefix context, but keep the match visible.
             start = max(0, pos - (max_line_len // 4))
             end = min(len(content), start + max_line_len)
             if end - start < max_line_len and start > 0:
@@ -174,10 +252,13 @@ def _scan_file_for_words(
                 "line": line_no,
                 "content": content,
                 "matches": hits[:8],
+                "score": float(c.get("score") or 0.0),
+                "coverage": int(c.get("coverage") or 0),
             }
         )
-        if len(out) >= max_occurrences:
-            break
+
+    # Deterministic ordering: best coverage/score first.
+    out.sort(key=lambda o: (-int(o.get("coverage") or 0), -float(o.get("score") or 0.0), int(o.get("line") or 0)))
     return out
 
 
@@ -186,6 +267,7 @@ def locate_files(
     *,
     overlay: OverlayGraph,
     index: Optional[OverlayIndex] = None,
+    physics: Optional["HaloPhysics"] = None,  # NEW: enables Query Lensing
     doc_filter: str = "",
     max_results: int = 0,
     preview_files: int = 8,
@@ -193,7 +275,12 @@ def locate_files(
     resolve_doc_path: Optional[Callable[[str], Optional[Path]]] = None,
 ) -> Dict:
     """
-    File discovery from issue text, using only σ-overlay.
+    File discovery from issue text.
+    
+    When `physics` is provided, enables **Query Lensing**:
+      - Expands query words through Halo neighbors
+      - Searches for synonyms/related concepts, not just direct matches
+      - Example: "Админ" finds files with "admin", "superuser", "permission"
 
     Returns a SERP-style result:
       - ranked files
@@ -207,64 +294,122 @@ def locate_files(
     doc_filter = (doc_filter or "").strip()
     idx = index or OverlayIndex.build(overlay)
 
-    # Build query hashes (deterministic, overlay-compatible).
-    word_hashes: Dict[str, str] = {}
-    for w in query_words:
-        word_hashes[w] = _resolve_query_hash(w, overlay=overlay, index=idx)
+    # === QUERY LENSING ===
+    # Expand query through Halo neighbors (when physics is available).
+    if physics is not None:
+        expanded = physics.expand_query(query_words)
+    else:
+        expanded = {}
+        for w in query_words:
+            h8 = _resolve_query_hash(w, overlay=overlay, index=idx)
+            expanded.setdefault(
+                h8,
+                {
+                    "label": w,
+                    "source_word": w,
+                    "is_direct": True,
+                    "weight": 1.0,
+                    "mass": 1.0,
+                },
+            )
 
-    file_scores: Dict[str, Dict] = {}  # doc -> {words:set, lines:set}
+    file_scores: Dict[str, Dict] = {}  # doc -> {hashes:set, lines:set}
 
-    def _touch(doc: str, word: str, line: Optional[int]) -> None:
+    def _touch(doc: str, h8: str, line: Optional[int]) -> None:
         if not doc:
             return
         if doc_filter and doc != doc_filter:
             return
         entry = file_scores.get(doc)
         if entry is None:
-            entry = {"words": set(), "lines": set()}
+            entry = {"hashes": set(), "lines": set()}
             file_scores[doc] = entry
-        entry["words"].add(word)
+        entry["hashes"].add(h8)
         if line:
             entry["lines"].add(int(line))
 
-    # Outgoing (word is src)
-    for word, h8 in word_hashes.items():
+    # Outgoing (term is src)
+    for h8 in expanded.keys():
         for edge in overlay.edges.get(h8, []):
             if not edge.doc:
                 continue
-            _touch(edge.doc, word, edge.line)
+            _touch(edge.doc, h8, edge.line)
 
-    # Incoming (word is tgt)
-    for word, h8 in word_hashes.items():
+    # Incoming (term is tgt)
+    for h8 in expanded.keys():
         for _src, edge in idx.incoming.get(h8, []):
             if not edge.doc:
                 continue
-            _touch(edge.doc, word, edge.line)
+            _touch(edge.doc, h8, edge.line)
 
-    # Rank: deterministic and simple (bits per unique match).
+    # === SCORING LAW (INVARIANTS V.2) ===
+    # Score = Σ Mass × IDF × Coupling
+    # Mass = global importance (α)
+    # IDF = local discriminativeness (σ) = log(N_docs / df)
+    # Coupling = lens conductivity (α weight), 1.0 for direct matches
+    import math
+
+    n_docs = len(idx.doc_stats) or 1
+
     ranked: List[Tuple[str, Dict]] = []
     for doc, info in file_scores.items():
-        # Preserve query order for UI clarity (deterministic).
-        matches = [w for w in query_words if w in info["words"]]
+        matched_hashes = [h8 for h8 in expanded.keys() if h8 in (info.get("hashes") or set())]
+        if not matched_hashes:
+            continue
+
+        word_contributions: List[Dict] = []
+        total_score = 0.0
+
+        for h8 in matched_hashes:
+            term = expanded.get(h8) or {}
+
+            df = len(idx.hash_to_docs.get(h8, set()))
+            idf = math.log(n_docs / df) if df and df < n_docs else 0.0
+
+            mass = float(term.get("mass") or 1.0)
+            coupling = 1.0 if bool(term.get("is_direct")) else abs(float(term.get("weight") or 0.0))
+
+            contribution = mass * idf * coupling
+            total_score += contribution
+
+            word_contributions.append(
+                {
+                    "hash8": h8,
+                    "word": str(term.get("label") or h8[:8]),
+                    "source_word": str(term.get("source_word") or ""),
+                    "is_direct": bool(term.get("is_direct")),
+                    "mass": mass,
+                    "df": df,
+                    "idf": idf,
+                    "weight": coupling,
+                    "contribution": contribution,
+                }
+            )
+
+        for wc in word_contributions:
+            wc["percent"] = round(wc["contribution"] / total_score * 100, 1) if total_score > 0 else 0.0
+
+        word_contributions.sort(key=lambda x: (-float(x.get("contribution") or 0.0), str(x.get("word") or "").lower()))
+        sorted_matches = [wc["word"] for wc in word_contributions]
+
         ranked.append(
             (
                 doc,
                 {
                     "file": doc,
-                    "n_matches": len(matches),
-                    "matching_words": matches,
-                    "candidate_lines": sorted(info["lines"])[:12],
-                    "score": 2 ** len(matches),
+                    "n_matches": len(matched_hashes),
+                    "matching_words": sorted_matches,
+                    "word_contributions": word_contributions,
+                    "score": round(total_score, 6),
                 },
             )
         )
-    ranked.sort(key=lambda x: (-int(x[1]["score"]), x[0].lower()))
+
+    ranked.sort(key=lambda x: (-float(x[1].get("score") or 0.0), -int(x[1].get("n_matches") or 0), x[0].lower()))
 
     # Apply max_results (0 = "all").
     results: List[Dict] = []
     for doc, info in ranked:
-        if info["score"] <= 1:
-            continue
         if max_results > 0 and len(results) >= max_results:
             break
         results.append(info)
@@ -275,13 +420,29 @@ def locate_files(
             path = resolve_doc_path(r["file"])
             if not path:
                 continue
+            contributions = list(r.get("word_contributions") or [])
+            n = len(contributions)
+            threshold_pct = (100.0 / n) if n else 0.0
+            signal_words = [
+                str(wc.get("word") or "")
+                for wc in contributions
+                if float(wc.get("percent") or 0.0) >= threshold_pct and float(wc.get("contribution") or 0.0) > 0.0
+            ]
+            weights: Dict[str, float] = {}
+            for wc in contributions:
+                w = str(wc.get("word") or "").strip().lower()
+                if not w:
+                    continue
+                weights[w] = weights.get(w, 0.0) + float(wc.get("contribution") or 0.0)
             occ = _scan_file_for_words(
                 path=path,
-                words=r.get("matching_words") or [],
+                words=signal_words or (r.get("matching_words") or []),
                 max_occurrences=int(preview_occurrences),
+                word_weights=weights or None,
             )
             if occ:
                 r["occurrences"] = occ
+                r["signal_words"] = signal_words
 
     return {
         "query_words": query_words,

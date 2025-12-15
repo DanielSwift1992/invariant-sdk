@@ -297,6 +297,168 @@ class HaloPhysics:
         """Access to local overlay graph."""
         return self._overlay
     
+    def get_neighbors(self, hash8_or_word: str, *, limit: int = 50) -> List[Dict]:
+        """
+        Get Halo neighbors for a word or hash8.
+        
+        Args:
+            hash8_or_word: Either a hash8 address or a surface word
+            limit: Maximum neighbors to return
+        
+        Returns:
+            List of {hash8, weight} dicts
+        """
+        from .halo import hash8_hex
+        
+        # Determine if input is hash8 or word
+        if len(hash8_or_word) == 16 and all(c in '0123456789abcdef' for c in hash8_or_word.lower()):
+            h8 = hash8_or_word.lower()
+        else:
+            # It's a word, try with Ġ prefix
+            h8 = hash8_hex(f"Ġ{hash8_or_word.lower()}")
+        
+        result = self._client.get_halo_page(h8, limit=limit)
+        return result.get("neighbors", [])
+    
+    def expand_query(self, words: List[str]) -> Dict[str, Dict]:
+        """
+        Query Lensing — Pure L0 Implementation.
+        
+        Theory (INVARIANTS.md):
+          - threshold (μ+3σ) is frozen at forge in meta
+          - all Halo neighbors already passed this threshold
+          - mass classifies SOURCE word (solid/gas), not neighbors
+          - no artificial limits (Neighborhood Size = Adaptive)
+        
+        Gas words (low mass) are not expanded — they are noise sources.
+        Solid words expand to ALL their Halo neighbors.
+        
+        Returns:
+            Dict[hash8] -> {
+                "label": str,           # Human-readable label
+                "source_word": str,     # Which query word this came from
+                "is_direct": bool,      # True if this is the query word itself
+                "weight": float,        # Connection strength (1.0 for direct)
+            }
+        """
+        from .halo import hash8_hex
+        
+        result: Dict[str, Dict] = {}
+        mean_mass = float(self.mean_mass)
+        # Crystal weight threshold (μ+3σ), frozen at forge.
+        threshold = float(self.meta.get("threshold") or 0.0)
+
+        # 1) Normalize + create direct terms (deterministic).
+        query_words: List[str] = []
+        query_hashes: List[str] = []
+        seen_query: set[str] = set()
+        for word in words:
+            w = (word or "").strip().lower()
+            if not w or w in seen_query:
+                continue
+            seen_query.add(w)
+
+            h8 = hash8_hex(f"Ġ{w}")
+            query_words.append(w)
+            query_hashes.append(h8)
+            result[h8] = {
+                "label": w,
+                "source_word": w,
+                "is_direct": True,
+                "weight": 1.0,
+                "mass": 1.0,  # Unknown words default to "maximally informative"
+            }
+
+        if not query_hashes:
+            return result
+
+        # 2) Batch meta lookup for query words (L3 efficiency).
+        try:
+            meta_pages = self._client.get_halo_pages(query_hashes, limit=0, min_abs_weight=0.0) or {}
+        except Exception:
+            meta_pages = {}
+
+        # 3) Classify which SOURCE words are solid (by mass) and should be expanded.
+        solid_hashes: List[str] = []
+        degree_by_hash: Dict[str, int] = {}
+        for w, h8 in zip(query_words, query_hashes):
+            page = meta_pages.get(h8) or {}
+            exists = bool(page.get("exists"))
+            meta = page.get("meta") or {}
+            degree = int(meta.get("degree_total") or 0)
+            degree_by_hash[h8] = degree
+
+            if not exists:
+                # Unknown words: keep direct match only (no halo expansion).
+                continue
+
+            word_mass = 1.0 / math.log(2 + degree) if degree > 0 else 0.0
+            result[h8]["mass"] = word_mass
+
+            if word_mass > mean_mass:
+                solid_hashes.append(h8)
+
+        # 4) Expand each solid word to all of its halo neighbors (no arbitrary caps).
+        neighbor_hashes: List[str] = []
+        neighbor_seen: set[str] = set()
+        for h8 in solid_hashes:
+            degree = int(degree_by_hash.get(h8) or 0)
+            if degree <= 0:
+                continue
+
+            try:
+                page = self._client.get_halo_page(
+                    h8,
+                    cursor=0,
+                    limit=degree,
+                    min_abs_weight=threshold,
+                )
+            except Exception:
+                continue
+
+            src_word = str((result.get(h8) or {}).get("source_word") or "")
+            for neighbor in page.get("neighbors", []) or []:
+                n_h8 = str(neighbor.get("hash8") or "").lower()
+                if not n_h8 or n_h8 in result or n_h8 in neighbor_seen:
+                    continue
+                neighbor_seen.add(n_h8)
+
+                result[n_h8] = {
+                    "label": n_h8[:8],  # Placeholder, resolved below
+                    "source_word": src_word,
+                    "is_direct": False,
+                    "weight": float(neighbor.get("weight") or 0.0),
+                    "mass": 1.0,  # Resolved below via meta batch
+                }
+                neighbor_hashes.append(n_h8)
+
+        # 5) Batch label and mass resolution for neighbors.
+        if neighbor_hashes:
+            try:
+                labels = self._client.get_labels_batch(neighbor_hashes)
+                for h8, token in (labels or {}).items():
+                    if h8 in result and token:
+                        result[h8]["label"] = token
+            except Exception:
+                pass  # Keep hash prefixes as fallback
+
+            try:
+                n_meta = self._client.get_halo_pages(neighbor_hashes, limit=0, min_abs_weight=0.0) or {}
+                for n_h8 in neighbor_hashes:
+                    page = n_meta.get(n_h8) or {}
+                    exists = bool(page.get("exists"))
+                    meta = page.get("meta") or {}
+                    degree = int(meta.get("degree_total") or 0)
+                    if not exists:
+                        # Unknown tokens are treated as maximally informative.
+                        result[n_h8]["mass"] = 1.0
+                        continue
+                    result[n_h8]["mass"] = 1.0 / math.log(2 + degree) if degree > 0 else 0.0
+            except Exception:
+                pass
+
+        return result
+    
     def _merge_with_overlay(self, hash8: str, global_halo: List[Dict]) -> List[Dict]:
         """
         Merge global halo with local overlay.
@@ -583,4 +745,3 @@ class HaloPhysics:
     def __repr__(self) -> str:
         overlay_info = f"+overlay({self._overlay.n_edges})" if self._overlay else ""
         return f"HaloPhysics({self.crystal_id}{overlay_info})"
-

@@ -277,10 +277,12 @@ def locate(issue_text: str, max_results: int = 0) -> str:
                 unknown_words.append(word)
     
     # File discovery + bounded previews (shared engine with UI/CLI).
+    # Pass _physics to enable Query Lensing (Halo neighbor expansion)
     locate_out = locate_files(
         issue_text,
         overlay=_overlay,
         index=_overlay_index,
+        physics=_physics,  # Enable Query Lensing!
         max_results=int(max_results or 0),
         preview_files=5,
         preview_occurrences=8,
@@ -992,7 +994,7 @@ def ingest(file_path: str) -> str:
             continue
         
         words = [w for w, _ in tokens]
-        unique_words = list(dict.fromkeys(words))[:500]
+        unique_words = list(dict.fromkeys(words))  # L0: Crystal decides Solid vs Gas via Phase Separation
         
         if len(unique_words) < 2:
             continue
@@ -1047,21 +1049,53 @@ def ingest(file_path: str) -> str:
             result = batch_results.get(h8) or {}
             if not result.get('exists'):
                 # Unknown words = Local Anchors (solid)
-                candidates.append((word, h8, 1.0))
+                candidates.append((word, h8, 1.0, 0, False))
                 continue
             meta = result.get('meta') or {}
             degree_total = int(meta.get('degree_total') or 0)
             mass = 1.0 / math.log(2 + max(0, degree_total)) if degree_total > 0 else 0
-            candidates.append((word, h8, mass))
+            candidates.append((word, h8, mass, degree_total, True))
         
-        # Select anchors
-        solid = [(w, h8) for w, h8, m in candidates if m > mean_mass]
+        # === LAW OF CONDENSATION (INVARIANTS V.1) ===
+        # Phase = Solid iff Mass_α > μ_mass OR TF_local > TF_crit
+        # This respects Hierarchy: local σ-observation can override α-classification
+        
+        # 1. Global Mass criterion (α-classification)
+        solid_by_mass = {(w, h8) for (w, h8, m, _deg, _exists) in candidates if m > mean_mass}
+
+        # 2. Local TF criterion (σ-observation / Condensation)
+        # Define critical pressure as the mean per-type frequency in this document.
+        # (No external constants; derived from the local distribution itself.)
+        from collections import Counter
+
+        word_counts = Counter(w for w, _ in tokens)
+        tf_mean = (sum(word_counts.values()) / len(word_counts)) if word_counts else 0.0
+
+        # Exclude LINK/hub words from condensing (Invariant: LINK if degree > √N).
+        n_labels = int((_physics.meta or {}).get("n_labels") or 1)
+        link_degree = math.sqrt(max(1, n_labels))
+
+        cand_by_word = {w: (h8, deg, exists) for (w, h8, _m, deg, exists) in candidates}
+        solid_by_tf = {
+            (w, cand_by_word[w][0])
+            for w, count in word_counts.items()
+            if count > tf_mean
+            and w in cand_by_word
+            and (
+                not cand_by_word[w][2]  # unknown words can condense
+                or float(cand_by_word[w][1]) <= link_degree
+            )
+        }
+        
+        # 3. Combined: anchor if EITHER criterion is met
+        solid = solid_by_mass | solid_by_tf
+        
         if len(solid) >= 2:
-            anchors = solid
+            anchors = list(solid)
         else:
             top = sorted(candidates, key=lambda x: x[2], reverse=True)[:64]
-            top_set = {h8 for _, h8, _ in top}
-            anchors = [(w, h8) for w, h8, _ in candidates if h8 in top_set]
+            top_set = {h8 for (_w, h8, _m, _deg, _exists) in top}
+            anchors = [(w, h8) for (w, h8, _m, _deg, _exists) in candidates if h8 in top_set]
         
         if len(anchors) < 2:
             continue
