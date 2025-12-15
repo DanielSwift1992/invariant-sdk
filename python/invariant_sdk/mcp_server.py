@@ -171,41 +171,32 @@ def status() -> str:
 @mcp.tool()
 def locate(issue_text: str, max_results: int = 0) -> str:
     """
-    Find relevant files from an issue, error, or task description.
+    Find relevant files AND exact definition lines from issue text.
     
-    USE INSTEAD OF: grep -rn, rg (repo-wide searches)
-    ADVANTAGE: Returns ONE ranked list with interference scoring (2^n)
+    USE INSTEAD OF: grep -rn, rg, find (repo-wide searches)
     
-    RECOMMENDED WORKFLOW:
-        1. locate("error message or keywords") → get ranked files
-        2. IF need exact line numbers: scoped_grep("pattern", "file1,file2")
-        3. read_block(doc, line) → view the actual code
+    KEY FEATURE: Coordinate Resolution
+        - Finds the EXACT line where query words co-occur
+        - Prioritizes definitions (def, class) over usages
+        - Returns preview at that line - usually enough to start fixing!
     
     Example:
-        locate("TypeError in user authentication module")
-        → Returns ranked files: auth.py (score=16), user.py (score=8)
+        locate("def separability_matrix")
+        → Returns: {file: "separable.py", first_match: {line: 293, preview: "def separability_matrix(...):"}}
         
-    For exact pattern matching, use scoped_grep() on results.
+        NO NEED FOR GREP - the preview shows the definition!
     
-    How scoring works:
-        score = 2^n where n = number of matching concepts
-        score=32 means 5 concepts matched → very relevant
-        score=2 means 1 concept matched → weak match
+    How it works:
+        1. Semantic search (Crystal) → finds relevant files
+        2. Coordinate resolution → finds best line in each file
+        3. Definition priority → shows def/class first, not imports
     
     Args:
-        issue_text: Paste the error message, bug report, or task description
-        max_results: How many files to return. Choose based on your needs:
-                     - For focused debugging: 3
-                     - For broad exploration: 10
-                     Default: all files with score > 1
+        issue_text: Paste error, keywords, or "def function_name" to find definition
+        max_results: How many files to return (0 = all with score > 1)
     
     Returns:
-        JSON with ranked files including:
-        - candidate_lines: specific line numbers where matches occur
-        - first_match: {line, preview} for top 5 files (immediate context!)
-        
-        The preview shows 2 lines starting at first match - often enough to
-        confirm this is the right file WITHOUT needing scoped_grep().
+        JSON with files + first_match preview at the BEST line (definition if exists)
     """
     _ensure_initialized()
     
@@ -310,17 +301,57 @@ def locate(issue_text: str, max_results: int = 0) -> str:
                 try:
                     text = path.read_text(encoding='utf-8')
                     lines = text.split('\n')
-                    first_line = info["lines"][0]
-                    if 1 <= first_line <= len(lines):
+                    
+                    # COORDINATE RESOLUTION (replaces grep):
+                    # Find the line where ALL query words co-occur
+                    # Priority: 1) All words on same line, 2) Definition (def/class), 3) First occurrence
+                    
+                    query_words_lower = [w.lower() for w in unique_words if len(w) >= 3]
+                    best_line = None
+                    best_score = -1
+                    
+                    # Scan ALL lines in file (not just candidate_lines) for co-occurrence
+                    # This is the key to replacing grep: find exact definition line
+                    # Limit to 500 lines for performance (most definitions are near top)
+                    scan_limit = min(len(lines), 500)
+                    
+                    for line_num in range(1, scan_limit + 1):
+                        line_content = lines[line_num - 1].lower()
+                        
+                        # Score: how many query words appear on this line?
+                        words_on_line = sum(1 for w in query_words_lower if w in line_content)
+                        if words_on_line == 0:
+                            continue  # No match, skip
+                        
+                        score = words_on_line * 10
+                        
+                        # Bonus for definitions (def/class/async def)
+                        stripped = lines[line_num - 1].strip()
+                        if stripped.startswith(('def ', 'class ', 'async def ')):
+                            score += 100  # Strong preference for definitions
+                        
+                        # Bonus if line is in candidate_lines (overlay confirmed)
+                        if line_num in info["lines"]:
+                            score += 5
+                        
+                        if score > best_score:
+                            best_score = score
+                            best_line = line_num
+                    
+                    # Fallback to first candidate_line if no scoring worked
+                    if best_line is None and info["lines"]:
+                        best_line = info["lines"][0]
+                    
+                    if 1 <= best_line <= len(lines):
                         # Get line + 1 context line after (minimal, per MDL)
                         preview_lines = []
-                        idx = first_line - 1
-                        preview_lines.append(f"{first_line}: {lines[idx].rstrip()[:100]}")
+                        idx = best_line - 1
+                        preview_lines.append(f"{best_line}: {lines[idx].rstrip()[:100]}")
                         if idx + 1 < len(lines):
-                            preview_lines.append(f"{first_line+1}: {lines[idx+1].rstrip()[:100]}")
+                            preview_lines.append(f"{best_line+1}: {lines[idx+1].rstrip()[:100]}")
                         
                         result_entry["first_match"] = {
-                            "line": first_line,
+                            "line": best_line,
                             "preview": "\n".join(preview_lines)
                         }
                         preview_count += 1
