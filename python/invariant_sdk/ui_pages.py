@@ -672,12 +672,14 @@ HTML_PAGE = '''<!DOCTYPE html>
 
             .occ-text {
                 min-width: 0;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
                 color: var(--text);
                 font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
                 font-size: 12px;
+                line-height: 1.45;
+                white-space: pre-wrap;
+                word-break: break-word;
+                overflow: hidden;
+                max-height: 4.35em; /* ~3 lines */
             }
 
             .file-actions {
@@ -764,6 +766,147 @@ HTML_PAGE = '''<!DOCTYPE html>
                 font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
                 font-size: 11px;
                 color: var(--text-3);
+            }
+
+            /* Highlight (query terms) */
+            .hl {
+                background: rgba(59,130,246,0.16);
+                border: 1px solid rgba(59,130,246,0.30);
+                padding: 0 2px;
+                border-radius: 4px;
+            }
+
+            .hl-primary {
+                background: rgba(34,197,94,0.14);
+                border-color: rgba(34,197,94,0.30);
+            }
+
+            /* Context tooltip (hover preview) */
+            .context-tooltip {
+                position: fixed;
+                background: var(--surface);
+                border: 1px solid var(--border);
+                border-radius: 14px;
+                box-shadow: 0 10px 30px rgba(0,0,0,0.6);
+                z-index: 9999;
+                max-width: min(760px, calc(100vw - 24px));
+                max-height: min(520px, calc(100vh - 24px));
+                overflow: hidden;
+                pointer-events: auto;
+            }
+
+            .tt-head {
+                padding: 10px 12px;
+                background: rgba(17, 17, 19, 0.88);
+                border-bottom: 1px solid rgba(255,255,255,0.06);
+                display: flex;
+                justify-content: space-between;
+                gap: 12px;
+                align-items: flex-start;
+            }
+
+            .tt-title {
+                font-weight: 600;
+                color: var(--text);
+                font-size: 12px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                max-width: 520px;
+                font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            }
+
+            .tt-sub {
+                margin-top: 4px;
+                font-size: 11px;
+                color: var(--text-3);
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                max-width: 520px;
+                font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            }
+
+            .tt-pills {
+                margin-top: 8px;
+                display: flex;
+                gap: 6px;
+                flex-wrap: wrap;
+                align-items: center;
+            }
+
+            .tt-pill {
+                display: inline-flex;
+                align-items: center;
+                padding: 2px 8px;
+                border-radius: 999px;
+                border: 1px solid rgba(255,255,255,0.10);
+                background: rgba(255,255,255,0.02);
+                color: var(--text-2);
+                font-size: 11px;
+                font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                max-width: 260px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .tt-pill.primary {
+                background: rgba(34,197,94,0.10);
+                border-color: rgba(34,197,94,0.28);
+                color: var(--text);
+            }
+
+            .tt-meta {
+                display: flex;
+                justify-content: space-between;
+                gap: 12px;
+                align-items: center;
+                padding: 8px 12px;
+                border-bottom: 1px solid rgba(255,255,255,0.06);
+                background: rgba(0,0,0,0.18);
+                font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                font-size: 11px;
+                color: var(--text-3);
+            }
+
+            .tt-body {
+                padding: 10px 12px;
+                overflow: auto;
+            }
+
+            .ctx-row {
+                display: flex;
+                gap: 10px;
+                align-items: baseline;
+                padding: 2px 0;
+            }
+
+            .ctx-row.active {
+                background: rgba(59,130,246,0.08);
+                border-radius: 10px;
+                padding: 4px 8px;
+                margin: 2px -8px;
+            }
+
+            .ctx-no {
+                width: 58px;
+                flex-shrink: 0;
+                text-align: right;
+                color: var(--text-3);
+                font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                font-size: 11px;
+            }
+
+            .ctx-code {
+                min-width: 0;
+                flex: 1;
+                white-space: pre-wrap;
+                word-break: break-word;
+                font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                line-height: 1.45;
+                font-size: 12px;
+                color: var(--text);
             }
         
         .result-list {
@@ -1494,6 +1637,93 @@ HTML_PAGE = '''<!DOCTYPE html>
                 try { return decodeURIComponent(v); } catch (e) { return String(v || ''); }
             }
 
+            function normalizeNeedles(needles) {
+                const out = [];
+                const seen = new Set();
+                (needles || []).forEach(v => {
+                    const s = String(v || '').trim();
+                    if (!s) return;
+                    const lower = s.toLowerCase();
+                    if (seen.has(lower)) return;
+                    seen.add(lower);
+                    out.push(lower);
+                });
+                return out;
+            }
+
+            function pickPrimaryNeedle(text, needles) {
+                const hay = String(text || '');
+                const lower = hay.toLowerCase();
+                let best = '';
+                let bestPos = 1e18;
+                let bestLen = 0;
+                (needles || []).forEach(n => {
+                    const needle = String(n || '').trim().toLowerCase();
+                    if (!needle) return;
+                    const pos = lower.indexOf(needle);
+                    if (pos < 0) return;
+                    if (pos < bestPos || (pos === bestPos && needle.length > bestLen)) {
+                        best = needle;
+                        bestPos = pos;
+                        bestLen = needle.length;
+                    }
+                });
+                return best || String((needles && needles[0]) || '').trim().toLowerCase();
+            }
+
+            function highlightLineHtml(text, needles, primaryNeedle) {
+                const src = String(text || '');
+                const hs = src.toLowerCase();
+                const ns = normalizeNeedles(needles);
+                const primary = String(primaryNeedle || '').trim().toLowerCase();
+                if (!src || !ns.length) return escHtml(src);
+
+                const ranges = [];
+                const MAX_RANGES = 96;
+                ns.forEach(n => {
+                    if (!n) return;
+                    let start = 0;
+                    while (start < hs.length && ranges.length < MAX_RANGES) {
+                        const idx = hs.indexOf(n, start);
+                        if (idx < 0) break;
+                        ranges.push({ start: idx, end: idx + n.length, needle: n });
+                        start = idx + n.length;
+                    }
+                });
+
+                if (!ranges.length) return escHtml(src);
+
+                ranges.sort((a, b) => {
+                    if (a.start !== b.start) return a.start - b.start;
+                    const la = (a.end - a.start);
+                    const lb = (b.end - b.start);
+                    if (la !== lb) return lb - la;
+                    const ap = (primary && a.needle === primary) ? 0 : 1;
+                    const bp = (primary && b.needle === primary) ? 0 : 1;
+                    return ap - bp;
+                });
+
+                const kept = [];
+                let lastEnd = -1;
+                for (let i = 0; i < ranges.length; i++) {
+                    const r = ranges[i];
+                    if (r.start < lastEnd) continue;
+                    kept.push(r);
+                    lastEnd = r.end;
+                }
+
+                let out = '';
+                let pos = 0;
+                kept.forEach(r => {
+                    if (r.start > pos) out += escHtml(src.slice(pos, r.start));
+                    const cls = (primary && r.needle === primary) ? 'hl hl-primary' : 'hl';
+                    out += '<span class="' + cls + '">' + escHtml(src.slice(r.start, r.end)) + '</span>';
+                    pos = r.end;
+                });
+                if (pos < src.length) out += escHtml(src.slice(pos));
+                return out;
+            }
+
             if (dropZone && fileInput) {
                 dropZone.addEventListener('click', () => fileInput.click());
                 dropZone.addEventListener('dragover', (e) => {
@@ -1981,12 +2211,16 @@ HTML_PAGE = '''<!DOCTYPE html>
 		                        const lineNo = Number(o.line || 0) || 0;
 		                        const contentText = String(o.content || '').trim();
 		                        const matches = Array.isArray(o.matches) ? o.matches : [];
-		                        const anchor = matches.length ? matches[0] : (words.length ? words[0] : '');
+		                        const needles = normalizeNeedles(matches.length ? matches : words);
+		                        const primary = pickPrimaryNeedle(contentText, needles);
+		                        const lineHtml = highlightLineHtml(contentText, needles, primary);
+		                        const needlesEnc = encodeURIComponent(JSON.stringify(needles || []));
+		                        const anchor = primary || (needles.length ? needles[0] : '');
 		                        if (!lineNo) return;
 		                        lines += `
-		                            <div class="occ-line" data-doc="${escHtml(doc)}" data-line="${lineNo}" data-word="${escHtml(anchor)}">
+		                            <div class="occ-line" data-doc="${escHtml(doc)}" data-line="${lineNo}" data-word="${escHtml(anchor)}" data-needles="${escHtml(needlesEnc)}">
 		                                <div class="occ-no">${escHtml(String(lineNo))}</div>
-		                                <div class="occ-text">${escHtml(contentText)}</div>
+		                                <div class="occ-text">${lineHtml}</div>
 		                            </div>
 		                        `;
 		                    });
@@ -2077,10 +2311,16 @@ HTML_PAGE = '''<!DOCTYPE html>
 		                el.addEventListener('mouseenter', async () => {
 		                    const doc = el.dataset.doc;
 		                    const line = el.dataset.line;
-		                    const word = el.dataset.word || '';
-		                    if (doc && line) {
-		                        await showContext(el, doc, line, '', word, q);
+		                    const needlesRaw = safeDecode(el.dataset.needles || '');
+		                    let needles = [];
+		                    if (needlesRaw) {
+		                        try { needles = JSON.parse(needlesRaw) || []; } catch (e) { needles = []; }
 		                    }
+		                    if (!Array.isArray(needles) || !needles.length) {
+		                        const word = String(el.dataset.word || '').trim();
+		                        if (word) needles = [word];
+		                    }
+		                    if (doc && line) await showContext(el, doc, line, '', needles, q);
 		                });
 		                el.addEventListener('click', async (e) => {
 		                    e.preventDefault();
@@ -2318,14 +2558,15 @@ HTML_PAGE = '''<!DOCTYPE html>
                 });
             }
 	        
-	        async function showContext(element, doc, line, ctxHash, word, query) {
-	            const key = doc + ':' + line + ':' + (ctxHash || '');
-	            
-	            // Check cache
+	        async function showContext(element, doc, line, ctxHash, needles, query) {
+	            const MAX_LINES = 18;
+	            const key = doc + ':' + line + ':' + (ctxHash || '') + ':' + String(MAX_LINES);
+
 	            if (!contextCache[key]) {
 	                try {
 	                    let url = '/api/context?doc=' + encodeURIComponent(doc) + '&line=' + encodeURIComponent(line);
-	                        if (ctxHash) url += '&ctx_hash=' + encodeURIComponent(ctxHash);
+	                    url += '&max_lines=' + encodeURIComponent(String(MAX_LINES));
+	                    if (ctxHash) url += '&ctx_hash=' + encodeURIComponent(ctxHash);
 	                    const res = await fetch(url);
 	                    const data = await res.json();
                         contextCache[key] = data || {};
@@ -2333,32 +2574,13 @@ HTML_PAGE = '''<!DOCTYPE html>
 	                    contextCache[key] = { error: 'Could not load context', status: 'broken' };
 	                }
 	            }
-	            
+
 	            const ctx = contextCache[key];
 	            if (!ctx) return;
-            
-            // Create or update tooltip
+
 	            if (!contextTooltip) {
 	                contextTooltip = document.createElement('div');
 	                contextTooltip.className = 'context-tooltip';
-	                contextTooltip.style.cssText = `
-	                    position: fixed;
-	                    background: var(--surface);
-	                    border: 1px solid var(--border);
-	                    border-radius: 8px;
-	                    padding: 12px 16px;
-	                    max-width: 500px;
-	                    max-height: 200px;
-	                    overflow: auto;
-	                    font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-	                    font-size: 12px;
-	                    color: var(--text);
-	                    white-space: pre-wrap;
-	                    word-break: break-word;
-	                    box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-	                    z-index: 9999;
-	                    pointer-events: auto;
-	                `;
                     contextTooltip.addEventListener('mouseenter', () => {
                         if (ctxHideTimer) clearTimeout(ctxHideTimer);
                     });
@@ -2367,94 +2589,117 @@ HTML_PAGE = '''<!DOCTYPE html>
                     });
 	                document.body.appendChild(contextTooltip);
 	            }
-            
-	            // Position tooltip
-	            const rect = element.getBoundingClientRect();
-	            contextTooltip.style.left = (rect.left + 20) + 'px';
-	            contextTooltip.style.top = (rect.bottom + 8) + 'px';
-	            
-	            // Show content with header
-	                const status = String(ctx.status || 'unchecked');
-	                const statusText =
-	                    status === 'fresh' ? '✓ σ-fresh' :
-	                    status === 'relocated' ? '↔ σ-relocated' :
-	                    status === 'broken' ? '✗ σ-broken' :
-	                    '… unchecked';
+
+	            const status = String(ctx.status || 'unchecked');
+	            const statusText =
+	                status === 'fresh' ? '✓ σ-fresh' :
+	                status === 'relocated' ? '↔ σ-relocated' :
+	                status === 'broken' ? '✗ σ-broken' :
+	                '… unchecked';
                 const statusColor =
                     status === 'fresh' ? 'var(--success)' :
                     status === 'relocated' ? 'var(--warning)' :
                     status === 'broken' ? 'var(--danger)' :
                     'var(--text-2)';
-	                const lineInfo = (ctx.actual_line && ctx.actual_line != ctx.requested_line)
-	                    ? (ctx.requested_line + '→' + ctx.actual_line)
-	                    : String(ctx.actual_line || ctx.requested_line || line);
 
-                    const anchor = String(ctx.anchor_word || word || '').trim();
-                    const edgeInfo = (query && anchor && query !== anchor)
-                        ? ('Edge: ' + query + ' → ' + anchor)
-                        : '';
+                const requestedLine = Number(ctx.requested_line || line || 0) || 0;
+                const actualLine = Number(ctx.actual_line || requestedLine || line || 0) || 0;
+	            const lineInfo = (requestedLine && actualLine && actualLine !== requestedLine)
+	                ? (requestedLine + '→' + actualLine)
+	                : String(actualLine || requestedLine || line);
 
-                    function escapeRegExp(s) {
-                        // Standard JS escape for use inside RegExp
-                        // Note: double-escaped so the generated HTML contains `/[.*+?^${}()|[\\]\\\\]/g` correctly.
-                        return String(s).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&');
-                    }
+                const blockStart = Number(ctx.block_start || 0) || (actualLine || requestedLine || 1);
+                const blockEnd = Number(ctx.block_end || 0) || 0;
+                const totalLines = Number(ctx.total_lines || 0) || 0;
 
-                    function highlightContent(text, needle) {
-                        const escaped = escHtml(String(text || ''));
-                        const n = String(needle || '').trim();
-                        if (!n) return escaped;
-                        try {
-                            const re = new RegExp(escapeRegExp(n), 'ig');
-                            return escaped.replace(re, (m) => '<span style="background:rgba(59,130,246,0.18);border:1px solid rgba(59,130,246,0.28);padding:0 2px;border-radius:4px;">' + m + '</span>');
-                        } catch (e) {
-                            return escaped;
-                        }
-                    }
+                const ctxLines = Array.isArray(ctx.lines)
+                    ? ctx.lines
+                    : (ctx.content ? String(ctx.content).split('\n') : []);
 
-                    const bodyText = ctx.content
-                        ? String(ctx.content)
-                        : (ctx.error ? ('Error: ' + String(ctx.error)) : '');
-                    const searched = Array.isArray(ctx.searched) ? ctx.searched.slice(0, 6) : [];
-                    const searchedHtml = searched.length
-                        ? ('<div style=\"margin-top:10px;color:var(--text-3);font-size:11px;\">Tried:\\n' + escHtml(searched.join('\\n')) + '</div>')
-                        : '';
+                const ns = normalizeNeedles(needles);
+                const activeIdx = Math.max(0, Math.min(ctxLines.length - 1, (actualLine || requestedLine || 1) - blockStart));
+                const activeText = String(ctxLines[activeIdx] || '');
+                const primary = pickPrimaryNeedle(activeText, ns) || pickPrimaryNeedle(String(query || ''), ns);
 
-	                const headerHtml = `
-	                    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:8px;">
-	                        <div style="min-width:0;">
-                                <div style="font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                                    ${escHtml(anchor || word || 'σ-context')}
-                                </div>
-                                <div style="color:var(--text-3);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">
-                                    ${escHtml('📄 ' + doc + ':' + lineInfo)}
-                                </div>
-	                        </div>
-	                        <div style="display:flex;gap:6px;flex-shrink:0;">
-	                            <button type="button" data-open="vscode" style="background:rgba(255,255,255,0.03);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:4px 8px;font-size:11px;cursor:pointer;">VS Code</button>
-	                            <button type="button" data-open="open" style="background:rgba(255,255,255,0.03);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:4px 8px;font-size:11px;cursor:pointer;">Open</button>
-	                            <button type="button" data-open="reveal" style="background:rgba(255,255,255,0.03);border:1px solid var(--border);color:var(--text);border-radius:8px;padding:4px 8px;font-size:11px;cursor:pointer;">Reveal</button>
-	                        </div>
-	                    </div>
-	                    <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:10px;">
-                            <div style="color:${statusColor};font-size:11px;">${escHtml(statusText)}</div>
-                            <div style="color:var(--text-3);font-size:11px;">${escHtml(edgeInfo)}</div>
+                const pills = [];
+                if (primary) pills.push(primary);
+                ns.forEach(n => { if (n && n !== primary) pills.push(n); });
+
+                const pillsHtml = pills.length
+                    ? ('<div class="tt-pills">' + pills.slice(0, 10).map((w, i) => (
+                        '<span class="tt-pill' + (i === 0 && primary ? ' primary' : '') + '" title="' + escHtml(w) + '">' + escHtml(w) + '</span>'
+                    )).join('') + '</div>')
+                    : '';
+
+                let rowsHtml = '';
+                for (let i = 0; i < ctxLines.length; i++) {
+                    const ln = blockStart + i;
+                    const isActive = actualLine ? (ln === actualLine) : (ln === requestedLine);
+                    const codeHtml = highlightLineHtml(String(ctxLines[i] || ''), ns, isActive ? primary : '');
+                    rowsHtml += `
+                        <div class="ctx-row${isActive ? ' active' : ''}">
+                            <div class="ctx-no">${escHtml(String(ln))}</div>
+                            <div class="ctx-code">${codeHtml}</div>
                         </div>
-	                `;
+                    `;
+                }
 
-	                const bodyHtml = `<div style="white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace;line-height:1.45;">${highlightContent(bodyText, anchor || word)}</div>${searchedHtml}`;
-		            contextTooltip.innerHTML = headerHtml + bodyHtml;
-		            contextTooltip.style.display = 'block';
+                const rangeText = (blockStart && (blockEnd || ctxLines.length))
+                    ? (String(blockStart) + '-' + String(blockEnd || (blockStart + ctxLines.length - 1)) + (totalLines ? (' / ' + totalLines) : ''))
+                    : (totalLines ? ('/ ' + totalLines) : '');
 
+	            contextTooltip.innerHTML = `
+                    <div class="tt-head">
+                        <div style="min-width:0;">
+                            <div class="tt-title">${escHtml(doc)}</div>
+                            <div class="tt-sub">${escHtml('line ' + lineInfo)}</div>
+                            ${pillsHtml}
+                        </div>
+                        <div style="display:flex;gap:6px;flex-shrink:0;">
+                            <button class="mini-btn" type="button" data-open="vscode">VS Code</button>
+                            <button class="mini-btn" type="button" data-open="open">Open</button>
+                            <button class="mini-btn" type="button" data-open="reveal">Reveal</button>
+                        </div>
+                    </div>
+                    <div class="tt-meta">
+                        <div style="color:${statusColor};">${escHtml(statusText)}</div>
+                        <div>${escHtml(rangeText)}</div>
+                    </div>
+                    <div class="tt-body">${rowsHtml || '<div style="color:var(--text-3);font-size:12px;">No context.</div>'}</div>
+                `;
+
+                contextTooltip.style.display = 'block';
+
+                const openLine = String(actualLine || requestedLine || line || '1');
                 contextTooltip.querySelectorAll('button[data-open]').forEach(btn => {
                     btn.onclick = async (e) => {
                         e.stopPropagation();
                         const mode = btn.dataset.open;
-                        await openDoc(mode, doc, line, ctxHash);
+                        await openDoc(mode, doc, openLine, ctxHash);
                     };
                 });
-	            
-	            // Hide on mouse leave
+
+                const rect = element.getBoundingClientRect();
+                const pad = 12;
+                let left = rect.left + 12;
+                let top = rect.bottom + 10;
+                const w = contextTooltip.offsetWidth || 360;
+                const h = contextTooltip.offsetHeight || 240;
+                const vw = window.innerWidth || 1000;
+                const vh = window.innerHeight || 800;
+
+                if (left + w > vw - pad) left = Math.max(pad, vw - w - pad);
+                if (left < pad) left = pad;
+
+                if (top + h > vh - pad) {
+                    const above = rect.top - h - 10;
+                    top = (above > pad) ? above : Math.max(pad, vh - h - pad);
+                }
+                if (top < pad) top = pad;
+
+                contextTooltip.style.left = left + 'px';
+                contextTooltip.style.top = top + 'px';
+
 	            element.addEventListener('mouseleave', () => {
                     scheduleHideContext(150);
 	            }, { once: true });

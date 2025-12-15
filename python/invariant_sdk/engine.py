@@ -115,7 +115,7 @@ def _scan_file_for_words(
     path: Path,
     words: Sequence[str],
     max_occurrences: int,
-    max_line_len: int = 200,
+    max_line_len: int = 320,
 ) -> List[Dict]:
     """
     Cheap grep-like preview for top results only (Invariant III).
@@ -136,14 +136,43 @@ def _scan_file_for_words(
 
     out: List[Dict] = []
     for line_no, line in enumerate(text.splitlines(), 1):
-        lower = line.lower()
+        raw = line.rstrip("\n")
+        lower = raw.lower()
         hits = [n for n in needles if n in lower]
         if not hits:
             continue
+
+        # Prefer a snippet that actually contains the first match (not always the prefix).
+        # Deterministic: earliest match position; tie-break by longer needle.
+        best_pos = None
+        best_len = 0
+        for n in hits:
+            pos = lower.find(n)
+            if pos < 0:
+                continue
+            if best_pos is None or pos < best_pos or (pos == best_pos and len(n) > best_len):
+                best_pos = pos
+                best_len = len(n)
+
+        content = raw
+        if max_line_len > 0 and len(content) > max_line_len:
+            pos = best_pos or 0
+            # Bias slightly to include some prefix context, but keep the match visible.
+            start = max(0, pos - (max_line_len // 4))
+            end = min(len(content), start + max_line_len)
+            if end - start < max_line_len and start > 0:
+                start = max(0, end - max_line_len)
+            snippet = content[start:end]
+            if start > 0:
+                snippet = "…" + snippet
+            if end < len(content):
+                snippet = snippet + "…"
+            content = snippet
+
         out.append(
             {
                 "line": line_no,
-                "content": line.rstrip()[:max_line_len],
+                "content": content,
                 "matches": hits[:8],
             }
         )
@@ -215,7 +244,8 @@ def locate_files(
     # Rank: deterministic and simple (bits per unique match).
     ranked: List[Tuple[str, Dict]] = []
     for doc, info in file_scores.items():
-        matches = sorted(info["words"])
+        # Preserve query order for UI clarity (deterministic).
+        matches = [w for w in query_words if w in info["words"]]
         ranked.append(
             (
                 doc,
@@ -339,4 +369,3 @@ def map_file(path: Path) -> Dict:
         items.append({"type": "signature", "name": stripped[:80], "line": i, "end_line": i})
     out["items"] = items
     return out
-

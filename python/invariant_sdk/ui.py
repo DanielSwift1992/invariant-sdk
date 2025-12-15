@@ -1696,6 +1696,7 @@ class UIHandler(BaseHTTPRequestHandler):
         doc = (params.get('doc', [''])[0] or '').strip()
         line_str = (params.get('line', [''])[0] or '').strip()
         ctx_hash = (params.get('ctx_hash', [''])[0] or '').strip()
+        max_lines_raw = (params.get('max_lines', [''])[0] or '').strip()
         
         if not doc or not line_str:
             self.send_json({'error': 'Missing doc or line parameter'}, 400)
@@ -1706,6 +1707,19 @@ class UIHandler(BaseHTTPRequestHandler):
         except ValueError:
             self.send_json({'error': 'Invalid line number'}, 400)
             return
+
+        # Optional: request more context for UI previews (bounded, deterministic).
+        # Default stays small; UI can ask for more via `max_lines`.
+        max_lines = 10
+        if max_lines_raw:
+            try:
+                max_lines = int(max_lines_raw)
+            except Exception:
+                max_lines = 10
+        if max_lines < 6:
+            max_lines = 6
+        if max_lines > 60:
+            max_lines = 60
         
         doc_path, candidates = self._resolve_doc_path(doc)
         
@@ -1739,7 +1753,7 @@ class UIHandler(BaseHTTPRequestHandler):
             )
             
             # Extract semantic block from actual_line
-            block_start, block_end, block_lines = self._extract_semantic_block(lines, actual_line)
+            block_start, block_end, block_lines = self._extract_semantic_block(lines, actual_line, max_lines=max_lines)
             
             self.send_json({
                 'doc': doc,
