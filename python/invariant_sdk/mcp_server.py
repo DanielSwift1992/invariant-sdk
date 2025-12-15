@@ -1139,9 +1139,10 @@ def ingest(file_path: str) -> str:
         if len(occurrences) < 2:
             continue
         
-        # Use relative path from ingested folder for doc name (prevents collisions)
-        # e.g., "pkg/utils.py" not "utils.py"
-        doc_name = str(file_path_obj.relative_to(path)) if path.is_dir() else file_path_obj.name
+        
+        # doc_name = path to file relative to cwd
+        # file_path_obj is already the correct relative path (from path.rglob)
+        doc_name = str(file_path_obj)
         edges_added = 0
         
         for i in range(len(occurrences) - 1):
@@ -1212,7 +1213,8 @@ def ingest(file_path: str) -> str:
 # ============================================================================
 
 def _find_doc_path(doc: str) -> Optional[Path]:
-    """Find document in project."""
+    """Find document in project. Supports both full paths and basename fallback."""
+    # Try exact path first (new overlay format with relative path)
     candidates = [
         Path(doc),
         Path(".") / doc,
@@ -1223,6 +1225,21 @@ def _find_doc_path(doc: str) -> Optional[Path]:
     for c in candidates:
         if c.exists() and c.is_file():
             return c
+    
+    # Fallback: recursive search for old overlays with only basename
+    # This handles case where doc="separable.py" but file is at "astropy/modeling/separable.py"
+    basename = Path(doc).name
+    if basename != doc:
+        return None  # Already tried full path, don't search again
+    
+    # Limit search to avoid infinite loops in huge projects
+    try:
+        for found in Path(".").rglob(basename):
+            if found.is_file():
+                return found
+    except Exception:
+        pass
+    
     return None
 
 
