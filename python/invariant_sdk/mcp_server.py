@@ -221,29 +221,53 @@ def locate(issue_text: str, max_results: int = 0) -> str:
     # Hash words and get mass from crystal
     word_hashes = {w: hash8_hex(f"Ġ{w}") for w in unique_words}
     
-    # Classify by mass: solid (anchor) vs gas (noise)
-    # Theory: Mass = 1/log(2+degree), Solid = mass > mean_mass
-    # Words not in crystal = unknown (we cannot judge them)
+    # THEORY: Overlay contains σ-facts (ground truth from ingested docs)
+    # Crystal is global knowledge (fallback for unknown words)
+    # Check overlay FIRST, only call Crystal for words NOT in overlay
+    
     solid_seeds = []
     gas_seeds = []
     unknown_words = []
     
-    try:
-        batch_results, _http = _get_halo_meta_cached(word_hashes.values(), chunk_size=4000)
-        for word, h8 in word_hashes.items():
-            result = batch_results.get(h8) or {}
-            if result.get('exists'):
-                meta = result.get('meta') or {}
-                degree = int(meta.get('degree_total') or 0)
-                mass = 1.0 / math.log(2 + max(0, degree)) if degree > 0 else 0
-                if mass > _physics.mean_mass:
-                    solid_seeds.append((word, h8, mass))
+    # Step 1: Check which words exist in overlay (fast, no HTTP)
+    overlay_known = set()
+    for word, h8 in word_hashes.items():
+        # Check if word exists as label in overlay
+        if h8 in _overlay.labels or any(h8 == e.tgt for edges in _overlay.edges.values() for e in edges):
+            overlay_known.add(word)
+            # Treat all overlay words as solid (they were anchors at ingest time)
+            solid_seeds.append((word, h8, 1.0))
+        elif word in _overlay.labels.values():
+            # Word label exists, find its hash
+            for node, label in _overlay.labels.items():
+                if label == word:
+                    overlay_known.add(word)
+                    solid_seeds.append((word, node, 1.0))
+                    break
+    
+    # Step 2: Only call Crystal for words NOT in overlay (if any)
+    words_needing_crystal = [w for w in unique_words if w not in overlay_known]
+    
+    if words_needing_crystal:
+        try:
+            crystal_hashes = {w: word_hashes[w] for w in words_needing_crystal}
+            batch_results, _http = _get_halo_meta_cached(crystal_hashes.values(), chunk_size=4000)
+            for word, h8 in crystal_hashes.items():
+                result = batch_results.get(h8) or {}
+                if result.get('exists'):
+                    meta = result.get('meta') or {}
+                    degree = int(meta.get('degree_total') or 0)
+                    mass = 1.0 / math.log(2 + max(0, degree)) if degree > 0 else 0
+                    if mass > _physics.mean_mass:
+                        solid_seeds.append((word, h8, mass))
+                    else:
+                        gas_seeds.append((word, h8, mass))
                 else:
-                    gas_seeds.append((word, h8, mass))
-            else:
+                    unknown_words.append(word)
+        except Exception:
+            # Crystal failed - treat all unknown as potential anchors
+            for word in words_needing_crystal:
                 unknown_words.append(word)
-    except Exception as e:
-        return json.dumps({"error": f"Crystal connection failed: {e}"})
     
     # Create lookup for ALL query words (not just crystal-classified)
     # Crystal classification is OPTIONAL (provides mass), not a filter
