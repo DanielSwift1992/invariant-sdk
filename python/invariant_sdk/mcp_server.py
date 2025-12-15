@@ -250,11 +250,16 @@ def locate(issue_text: str, max_results: int = 0) -> str:
     all_word_hashes = word_hashes  # All query words
     word_mass_lookup = {word: mass for word, h8, mass in solid_seeds + gas_seeds}
     
+    
     # Search overlay for ALL query words
+    # CRITICAL: Check both as source (edges.get) AND as target (iterate all)
     file_scores = {}  # doc -> {words, lines}
     
+    query_hashes = set(all_word_hashes.values())
+    
+    # Build reverse lookup: find all edges where our query words appear as tgt
     for word, h8 in all_word_hashes.items():
-        # Check if this word has edges in overlay
+        # Check as SOURCE (word -> something)
         for edge in _overlay.edges.get(h8, []):
             if not edge.doc:
                 continue
@@ -263,6 +268,20 @@ def locate(issue_text: str, max_results: int = 0) -> str:
             file_scores[edge.doc]["words"].add(word)
             if edge.line and edge.line not in file_scores[edge.doc]["lines"]:
                 file_scores[edge.doc]["lines"].append(edge.line)
+    
+    # Check as TARGET (something -> word)
+    for src_hash, edge_list in _overlay.edges.items():
+        for edge in edge_list:
+            if edge.tgt in query_hashes and edge.doc:
+                # Find which word this target hash belongs to
+                for word, h8 in all_word_hashes.items():
+                    if h8 == edge.tgt:
+                        if edge.doc not in file_scores:
+                            file_scores[edge.doc] = {"words": set(), "lines": []}
+                        file_scores[edge.doc]["words"].add(word)
+                        if edge.line and edge.line not in file_scores[edge.doc]["lines"]:
+                            file_scores[edge.doc]["lines"].append(edge.line)
+                        break
     
     # Calculate score: solid matches = 2^n, gas matches add 1 each
     # This is theory: solid = high information, gas = low information
