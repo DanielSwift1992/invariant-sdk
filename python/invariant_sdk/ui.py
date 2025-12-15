@@ -1268,6 +1268,9 @@ class UIHandler(BaseHTTPRequestHandler):
                     continue
                 result = batch_results.get(h8) or {}
                 if not result.get('exists'):
+                    # Unknown words are local anchors (σ) by definition.
+                    # Treat as high-mass so they survive the phase boundary.
+                    candidates.append((word, h8, 1.0))
                     continue
                 meta = result.get('meta') or {}
                 try:
@@ -1433,6 +1436,7 @@ class UIHandler(BaseHTTPRequestHandler):
                     continue
                 result = batch_results.get(h8) or {}
                 if not result.get('exists'):
+                    candidates.append((word, h8, 1.0))
                     continue
                 meta = result.get('meta') or {}
                 try:
