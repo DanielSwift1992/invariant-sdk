@@ -1211,8 +1211,8 @@ HTML_PAGE = '''<!DOCTYPE html>
 		                               oninput="handleInput(this.value)" autocomplete="off">
                         <div class="autocomplete" id="autocomplete"></div>
                     </div>
-                    <button class="btn" id="searchBtn" onclick="search()">Search</button>
-                </div>
+	                    <button class="btn" id="searchBtn" onclick="search()">Locate</button>
+	                </div>
         
 	                <div id="content">
 	                    <div class="empty">
