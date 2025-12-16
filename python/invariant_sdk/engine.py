@@ -535,6 +535,21 @@ def locate_files(
         word_contributions.sort(key=lambda x: (-float(x.get("contribution") or 0.0), str(x.get("word") or "").lower()))
         sorted_matches = [wc["word"] for wc in word_contributions]
 
+        # V.3 Observation Law: Only SIGNAL contributes to ranking
+        # Noise floor = 1/N (uniform distribution baseline)
+        # Words below threshold are noise - they don't add to score
+        n_matched = len(word_contributions) or 1
+        threshold_pct = 100.0 / n_matched  # 1/N as percentage
+        
+        signal_score = sum(
+            wc["contribution"] 
+            for wc in word_contributions 
+            if wc.get("percent", 0.0) > threshold_pct
+        )
+        # Fallback: if all words are noise, use max contribution (there's always at least one signal)
+        if signal_score == 0 and word_contributions:
+            signal_score = word_contributions[0]["contribution"]
+
         # Semantic Bridges: Show expansion paths (V.3 Observation Law - make inference visible)
         # Only include indirect matches where found_word ≠ source_word
         semantic_bridges = []
@@ -555,8 +570,8 @@ def locate_files(
                     "n_matches": len(matched_hashes),
                     "matching_words": sorted_matches,
                     "word_contributions": word_contributions,
-                    "semantic_bridges": semantic_bridges,  # NEW: shows expansion logic
-                    "score": round(total_score, 6),
+                    "semantic_bridges": semantic_bridges,
+                    "score": round(signal_score, 6),  # V.3: Only signal, not noise
                 },
             )
         )
