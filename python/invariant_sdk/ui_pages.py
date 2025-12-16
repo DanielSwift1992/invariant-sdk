@@ -187,9 +187,8 @@ HTML_PAGE = '''<!DOCTYPE html>
 
             .sidebar-header {
                 display: flex;
-                justify-content: space-between;
-                align-items: flex-start;
-                gap: 12px;
+                flex-direction: column;
+                gap: 8px;
                 margin-bottom: 10px;
             }
 
@@ -202,13 +201,10 @@ HTML_PAGE = '''<!DOCTYPE html>
             }
 
             .sidebar-selected {
-                margin-top: 6px;
+                margin-top: 2px;
                 color: var(--text-2);
                 font-size: 12px;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-                max-width: 240px;
+                word-break: break-word;
             }
 
             .sidebar-actions {
@@ -346,6 +342,12 @@ HTML_PAGE = '''<!DOCTYPE html>
 	        .doc-action:disabled {
 	            opacity: 0.55;
 	            cursor: not-allowed;
+	        }
+
+	        .doc-action.danger:hover:not(:disabled) {
+	            border-color: rgba(239, 68, 68, 0.65);
+	            background: rgba(239, 68, 68, 0.15);
+	            color: #f87171;
 	        }
 
 	        .graph-preview {
@@ -1412,6 +1414,7 @@ HTML_PAGE = '''<!DOCTYPE html>
                                 <button id="revealDocBtn" class="doc-action" type="button" disabled>Reveal</button>
                                 <button id="vscodeDocBtn" class="doc-action" type="button" disabled>VS Code</button>
                                 <button id="reindexBtn" class="doc-action" type="button" disabled>Reindex</button>
+                                <button id="deleteDocBtn" class="doc-action danger" type="button" disabled>Delete</button>
                             </div>
                         </div>
 
@@ -1940,6 +1943,37 @@ HTML_PAGE = '''<!DOCTYPE html>
                 });
             }
 
+            const deleteDocBtn = document.getElementById('deleteDocBtn');
+            if (deleteDocBtn) {
+                deleteDocBtn.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    if (!selectedDoc) return;
+                    if (!confirm(`Delete "${selectedDoc}" from index?\\n\\nThis removes all edges for this document. The file itself is not deleted.`)) return;
+                    
+                    deleteDocBtn.disabled = true;
+                    deleteDocBtn.textContent = 'Deleting...';
+                    try {
+                        const resp = await fetch('/api/delete', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({doc: selectedDoc})
+                        });
+                        const data = await resp.json();
+                        if (data.success) {
+                            setSelectedDoc('');
+                            await refreshDocTree();
+                        } else {
+                            alert(data.error || 'Delete failed');
+                        }
+                    } catch (err) {
+                        alert('Delete error: ' + err.message);
+                    }
+                    deleteDocBtn.disabled = false;
+                    deleteDocBtn.textContent = 'Delete';
+                });
+            }
+
             let docsCache = [];
             let openFolders = new Set();
 
@@ -1970,6 +2004,7 @@ HTML_PAGE = '''<!DOCTYPE html>
                 if (openDocBtn) openDocBtn.disabled = !enabled;
                 if (revealDocBtn) revealDocBtn.disabled = !enabled;
                 if (vscodeDocBtn) vscodeDocBtn.disabled = !enabled;
+                if (deleteDocBtn) deleteDocBtn.disabled = !enabled;
 
                 if (reindexBtn) {
                     reindexBtn.disabled = !enabled;

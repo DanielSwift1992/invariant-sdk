@@ -330,6 +330,13 @@ def cmd_ingest(args: argparse.Namespace) -> int:
 
         # Create edges between consecutive tokens
         doc_name = str(file_path.relative_to(input_path) if input_path.is_dir() else file_path.name)
+        
+        # DEDUPLICATION: Remove old edges for this doc before adding new
+        # Theory: Replace, not accumulate (prevents overlay bloat on re-ingest)
+        removed = overlay.delete_doc(doc_name)
+        if removed > 0:
+            print(f"    Replaced: removed {removed} old edges")
+        
         doc_edges = 0
 
         for j in range(len(tokens_with_pos) - 1):

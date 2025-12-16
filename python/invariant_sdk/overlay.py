@@ -325,6 +325,27 @@ class OverlayGraph:
         """Define custom label for a hash8."""
         self.labels[node] = label
     
+    def delete_doc(self, doc: str) -> int:
+        """Delete all edges belonging to a document.
+        
+        Args:
+            doc: Document name/path to delete
+            
+        Returns:
+            Number of edges deleted
+        
+        Theory: Conservation Law - explicit deletion only (no silent evaporation).
+        """
+        deleted = 0
+        for src in list(self.edges.keys()):
+            original_len = len(self.edges[src])
+            self.edges[src] = [e for e in self.edges[src] if e.doc != doc]
+            deleted += original_len - len(self.edges[src])
+            # Clean up empty source nodes
+            if not self.edges[src]:
+                del self.edges[src]
+        return deleted
+    
     def get_neighbors(self, src: str, ring_filter: Optional[str] = None) -> List[Dict]:
         """
         Get local neighbors for a source node.

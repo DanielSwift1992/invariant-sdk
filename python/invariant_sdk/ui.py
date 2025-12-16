@@ -118,6 +118,8 @@ class UIHandler(BaseHTTPRequestHandler):
             self.api_ingest()
         elif self.path == '/api/reindex':
             self.api_reindex()
+        elif self.path.startswith('/api/delete'):
+            self.api_delete()
         else:
             self.send_error(404)
     
@@ -1566,6 +1568,49 @@ class UIHandler(BaseHTTPRequestHandler):
                 'removed_edges': removed,
                 'edges': edges_added,
                 'anchors': len(anchor_words),
+            })
+        except json.JSONDecodeError:
+            self.send_json({'error': 'Invalid JSON'}, 400)
+        except Exception as e:
+            self.send_json({'error': str(e)}, 500)
+    
+    def api_delete(self):
+        """Delete a document from overlay (remove all its edges)."""
+        content_length = int(self.headers.get('Content-Length', 0))
+        body = self.rfile.read(content_length)
+        
+        try:
+            data = json.loads(body)
+            doc = (data.get('doc') or '').strip()
+            if not doc:
+                self.send_json({'error': 'Missing doc'}, 400)
+                return
+            
+            overlay = UIHandler.overlay
+            overlay_path = UIHandler.overlay_path
+            
+            if not overlay:
+                self.send_json({'error': 'No overlay loaded'}, 400)
+                return
+            
+            # Delete all edges for this doc
+            deleted = overlay.delete_doc(doc)
+            
+            if deleted == 0:
+                self.send_json({'error': f'No edges found for doc: {doc}'}, 404)
+                return
+            
+            # Save overlay
+            if overlay_path:
+                overlay.save(overlay_path)
+            
+            UIHandler._invalidate_overlay_caches()
+            
+            self.send_json({
+                'success': True,
+                'doc': doc,
+                'deleted_edges': deleted,
+                'remaining_edges': overlay.n_edges
             })
         except json.JSONDecodeError:
             self.send_json({'error': 'Invalid JSON'}, 400)
