@@ -1575,11 +1575,23 @@ class UIHandler(BaseHTTPRequestHandler):
     def api_status(self):
         physics = UIHandler.physics
         overlay = UIHandler.overlay
+        overlay_path = UIHandler.overlay_path
+        
+        # Get overlay file mtime for freshness indicator
+        overlay_mtime = None
+        if overlay_path:
+            try:
+                p = Path(overlay_path)
+                if p.exists():
+                    overlay_mtime = p.stat().st_mtime
+            except Exception:
+                pass
         
         self.send_json({
             'crystal': physics.crystal_id if physics else None,
             'edges': overlay.n_edges if overlay else 0,
-            'labels': len(overlay.labels) if overlay else 0
+            'labels': len(overlay.labels) if overlay else 0,
+            'overlay_mtime': overlay_mtime
         })
 
     def api_docs(self):
