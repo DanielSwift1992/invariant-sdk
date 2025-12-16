@@ -1962,7 +1962,7 @@ HTML_PAGE = '''<!DOCTYPE html>
                         const data = await resp.json();
                         if (data.success) {
                             setSelectedDoc('');
-                            await refreshDocTree();
+                            await loadDocs();
                         } else {
                             alert(data.error || 'Delete failed');
                         }
