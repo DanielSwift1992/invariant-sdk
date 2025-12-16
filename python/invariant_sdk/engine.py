@@ -573,17 +573,24 @@ def locate_files(
             # Strict > comparison: at equilibrium (= 1/N) there's no signal
             threshold_pct = 100.0 / n if n else 0.0
             
-            # Invariant IV: Will > Observation
-            # Query words (WILL) are ALWAYS signals — user expressed intent
-            # Expanded terms (OBSERVATION) filtered if strictly above noise
-            sig_words = list(query_words)  # WILL: always included
+            # V.3 Observation Law: Only words with contribution > 1/N are above noise floor
+            # This applies equally to query words and expanded words (no exceptions)
+            # Words below threshold are "below noise floor" (INVARIANTS.md lines 273-279)
+            sig_words = []
             for wc in contributions:
                 word = str(wc.get("word") or "")
-                if not word or word in sig_words:
+                if not word:
                     continue
-                # OBSERVATION: only include if STRICTLY above noise threshold
-                if float(wc.get("percent") or 0.0) > threshold_pct and float(wc.get("contribution") or 0.0) > 0.0:
+                pct = float(wc.get("percent") or 0.0)
+                contrib = float(wc.get("contribution") or 0.0)
+                # STRICTLY above threshold per V.3 (not >=)
+                if pct > threshold_pct and contrib > 0.0:
                     sig_words.append(word)
+            
+            # Fallback: if filter killed everything, take the highest contributor
+            # (there must be at least one signal if file matched at all)
+            if not sig_words and contributions:
+                sig_words.append(str(contributions[0].get("word") or ""))
             weights: Dict[str, float] = {}
             for wc in contributions:
                 w = str(wc.get("word") or "").strip().lower()
