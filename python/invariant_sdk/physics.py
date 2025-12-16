@@ -395,8 +395,11 @@ class HaloPhysics:
             word_mass = 1.0 / math.log(2 + degree) if degree > 0 else 0.0
             result[h8]["mass"] = word_mass
 
-            if word_mass > mean_mass:
-                solid_hashes.append(h8)
+            # Invariant IV: "Will overrides Observation"
+            # Query words = User's Will = FORCED SOLID (always expand)
+            # Mass filter applies only to NEIGHBORS (the expansion results)
+            # NOT to SOURCE words (the query itself)
+            solid_hashes.append(h8)
 
         # 4) Expand each solid word to all of its halo neighbors (no arbitrary caps).
         neighbor_hashes: List[str] = []
