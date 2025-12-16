@@ -126,6 +126,133 @@ def _resolve_query_hash(word: str, *, overlay: OverlayGraph, index: Optional[Ove
     return h8
 
 
+def _find_epicenter(line_hashes: Dict[int, set]) -> tuple:
+    """
+    Find minimal interval containing maximum unique hashes (Theory-Pure).
+    
+    No magic radius. The window is defined by WHERE THE DATA EXISTS.
+    
+    Algorithm (Minimum Enclosing Interval):
+      - Find the smallest contiguous line range that contains ALL unique hashes
+      - Return (epicenter_line, window_start, window_end)
+    
+    This is the sliding window approach: O(n) where n = number of lines with hashes.
+    
+    Formula:
+      Epicenter = argmin |window| s.t. Coverage(window) = max
+    """
+    if not line_hashes:
+        return (1, 1, 1)
+    
+    lines_sorted = sorted(line_hashes.keys())
+    if len(lines_sorted) == 1:
+        ln = lines_sorted[0]
+        return (ln, ln, ln)
+    
+    # Collect all unique hashes (target coverage)
+    all_hashes: set = set()
+    for hs in line_hashes.values():
+        all_hashes.update(hs)
+    target_coverage = len(all_hashes)
+    
+    if target_coverage == 0:
+        ln = lines_sorted[0]
+        return (ln, ln, ln)
+    
+    # Sliding window to find minimum enclosing interval
+    best_start = lines_sorted[0]
+    best_end = lines_sorted[-1]
+    best_size = best_end - best_start + 1
+    
+    left = 0
+    current_hashes: Dict[str, int] = {}  # hash -> count
+    
+    for right in range(len(lines_sorted)):
+        # Add hashes at right position
+        for h in line_hashes.get(lines_sorted[right], set()):
+            current_hashes[h] = current_hashes.get(h, 0) + 1
+        
+        # Shrink from left while still covering all hashes
+        while len(current_hashes) == target_coverage and left <= right:
+            window_start = lines_sorted[left]
+            window_end = lines_sorted[right]
+            window_size = window_end - window_start + 1
+            
+            if window_size < best_size:
+                best_size = window_size
+                best_start = window_start
+                best_end = window_end
+            
+            # Remove hashes at left position
+            for h in line_hashes.get(lines_sorted[left], set()):
+                current_hashes[h] -= 1
+                if current_hashes[h] == 0:
+                    del current_hashes[h]
+            left += 1
+    
+    epicenter = (best_start + best_end) // 2
+    return (epicenter, best_start, best_end)
+
+
+def _read_context_window(
+    *,
+    path: Path,
+    start_line: int,
+    end_line: int,
+    signal_words: Sequence[str],
+    word_weights: Optional[Dict[str, float]] = None,
+) -> List[Dict]:
+    """
+    Surgical file read in the interference window (Invariant III: Energy Law).
+    
+    No magic radius. Reads exactly the window defined by data.
+    Lines are sorted chronologically (Chronology Law).
+    No character truncation (Identity Law — don't cut atoms).
+    """
+    try:
+        text = path.read_text(encoding="utf-8", errors="ignore")
+    except Exception:
+        return []
+    
+    lines = text.splitlines()
+    if not lines:
+        return []
+    
+    # Clamp to valid range
+    start = max(1, start_line)
+    end = min(len(lines), end_line)
+    
+    needles = [w.strip().lower() for w in signal_words if w and w.strip()]
+    if not needles:
+        return []
+    
+    needle_weights = {n: float((word_weights or {}).get(n, 1.0)) for n in needles}
+    out: List[Dict] = []
+    
+    # Read all lines in the window (chronological order)
+    for i in range(start, end + 1):
+        if i < 1 or i > len(lines):
+            continue
+        raw = lines[i - 1].rstrip("\n")
+        lower = raw.lower()
+        
+        # Find which signal words appear on this line
+        hits = [n for n in needles if n in lower]
+        
+        # Include line even if no hits (context continuity)
+        hits_set = set(hits)
+        score = sum(needle_weights.get(n, 0.0) for n in hits_set)
+        
+        out.append({
+            "line": i,
+            "content": raw,  # No truncation — let UI handle
+            "matches": sorted(hits_set),
+            "score": score,
+        })
+    
+    return out  # Already in chronological order
+
+
 def _scan_file_for_words(
     *,
     path: Path,
@@ -313,7 +440,14 @@ def locate_files(
                 },
             )
 
-    file_scores: Dict[str, Dict] = {}  # doc -> {hashes:set, lines:set}
+    # Identify direct query hashes (Invariant IV: Will > Observation)
+    # These are the user's actual query terms, not expansions
+    direct_hashes: set = set()
+    for w in query_words:
+        h8 = _resolve_query_hash(w, overlay=overlay, index=idx)
+        direct_hashes.add(h8)
+
+    file_scores: Dict[str, Dict] = {}  # doc -> {hashes:set, line_hashes:dict, direct_line_hashes:dict}
 
     def _touch(doc: str, h8: str, line: Optional[int]) -> None:
         if not doc:
@@ -322,11 +456,20 @@ def locate_files(
             return
         entry = file_scores.get(doc)
         if entry is None:
-            entry = {"hashes": set(), "lines": set()}
+            entry = {"hashes": set(), "line_hashes": {}, "direct_line_hashes": {}}
             file_scores[doc] = entry
         entry["hashes"].add(h8)
         if line:
-            entry["lines"].add(int(line))
+            ln = int(line)
+            # Track all hashes for scoring
+            if ln not in entry["line_hashes"]:
+                entry["line_hashes"][ln] = set()
+            entry["line_hashes"][ln].add(h8)
+            # Track only direct hashes for epicenter (Will > Observation)
+            if h8 in direct_hashes:
+                if ln not in entry["direct_line_hashes"]:
+                    entry["direct_line_hashes"][ln] = set()
+                entry["direct_line_hashes"][ln].add(h8)
 
     # Outgoing (term is src)
     for h8 in expanded.keys():
@@ -414,35 +557,71 @@ def locate_files(
             break
         results.append(info)
 
-    # Preview occurrences for top files (bounded file reads).
+    # Preview occurrences for top files.
+    # Use coordinate-based epicenter when line provenance exists (Energy Law),
+    # fall back to grep when no coordinates are available (backward compat).
     if resolve_doc_path:
         for i, r in enumerate(results[: max(0, int(preview_files))]):
-            path = resolve_doc_path(r["file"])
+            doc_name = r["file"]
+            path = resolve_doc_path(doc_name)
             if not path:
                 continue
+            
             contributions = list(r.get("word_contributions") or [])
             n = len(contributions)
-            threshold_pct = (100.0 / n) if n else 0.0
-            signal_words = [
-                str(wc.get("word") or "")
-                for wc in contributions
-                if float(wc.get("percent") or 0.0) >= threshold_pct and float(wc.get("contribution") or 0.0) > 0.0
-            ]
+            # Threshold = 1/N (uniform distribution baseline — Observation Law V.3)
+            # Strict > comparison: at equilibrium (= 1/N) there's no signal
+            threshold_pct = 100.0 / n if n else 0.0
+            
+            # Invariant IV: Will > Observation
+            # Query words (WILL) are ALWAYS signals — user expressed intent
+            # Expanded terms (OBSERVATION) filtered if strictly above noise
+            sig_words = list(query_words)  # WILL: always included
+            for wc in contributions:
+                word = str(wc.get("word") or "")
+                if not word or word in sig_words:
+                    continue
+                # OBSERVATION: only include if STRICTLY above noise threshold
+                if float(wc.get("percent") or 0.0) > threshold_pct and float(wc.get("contribution") or 0.0) > 0.0:
+                    sig_words.append(word)
             weights: Dict[str, float] = {}
             for wc in contributions:
                 w = str(wc.get("word") or "").strip().lower()
                 if not w:
                     continue
                 weights[w] = weights.get(w, 0.0) + float(wc.get("contribution") or 0.0)
+            
+            # Coordinate-based preview (Energy Law: use what we already know)
+            # Use DIRECT query hashes for epicenter (Invariant IV: Will > Observation)
+            direct_line_hashes = file_scores.get(doc_name, {}).get("direct_line_hashes") or {}
+            if direct_line_hashes:
+                # Find minimum enclosing interval (no magic radius)
+                epicenter, window_start, window_end = _find_epicenter(direct_line_hashes)
+                # Read the data-defined window (no magic radius)
+                occ = _read_context_window(
+                    path=path,
+                    start_line=window_start,
+                    end_line=window_end,
+                    signal_words=sig_words or (r.get("matching_words") or []),
+                    word_weights=weights or None,
+                )
+                if occ:
+                    r["occurrences"] = occ
+                    r["signal_words"] = sig_words
+                    r["epicenter"] = epicenter
+                    r["window"] = {"start": window_start, "end": window_end}
+                    continue
+            
+            # Fallback: grep-style scan (for overlays without line provenance)
             occ = _scan_file_for_words(
                 path=path,
-                words=signal_words or (r.get("matching_words") or []),
+                words=sig_words or (r.get("matching_words") or []),
                 max_occurrences=int(preview_occurrences),
                 word_weights=weights or None,
             )
             if occ:
                 r["occurrences"] = occ
-                r["signal_words"] = signal_words
+                r["signal_words"] = sig_words
 
     return {
         "query_words": query_words,

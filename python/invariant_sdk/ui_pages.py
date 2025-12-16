@@ -728,51 +728,63 @@ HTML_PAGE = '''<!DOCTYPE html>
                 align-items: center;
             }
 
+            /* IDE-style code preview (continuous block) */
             .file-occ {
                 margin-top: 12px;
-                border-top: 1px solid rgba(255,255,255,0.06);
-                padding-top: 12px;
                 display: flex;
                 flex-direction: column;
-                gap: 8px;
+                background: rgba(0,0,0,0.25);
+                border-radius: 10px;
+                border: 1px solid rgba(255,255,255,0.06);
+                font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+                max-height: 400px;  /* ~20 lines of code */
+                overflow: auto;  /* Scroll on container, not individual lines */
             }
 
             .occ-line {
                 display: flex;
-                gap: 10px;
+                gap: 12px;
                 align-items: baseline;
-                padding: 8px 10px;
-                border-radius: 10px;
-                background: rgba(0,0,0,0.18);
-                border: 1px solid rgba(255,255,255,0.06);
+                padding: 3px 12px;
                 cursor: pointer;
-                transition: background 0.15s, border-color 0.15s;
+                transition: background 0.1s;
+                border-left: 3px solid transparent;
             }
 
             .occ-line:hover {
-                background: rgba(0,0,0,0.24);
-                border-color: rgba(255,255,255,0.10);
+                background: rgba(255,255,255,0.04);
+            }
+
+            /* Lines with matches get subtle highlight */
+            .occ-line.has-match {
+                background: rgba(255,215,0,0.04);
+                border-left-color: rgba(255,215,0,0.3);
+            }
+
+            .occ-line.has-match:hover {
+                background: rgba(255,215,0,0.08);
             }
 
             .occ-no {
                 flex-shrink: 0;
                 color: var(--text-3);
-                font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-                font-size: 12px;
-                min-width: 64px;
+                font-size: 11px;
+                min-width: 48px;
                 text-align: right;
+                user-select: none;
             }
 
             .occ-text {
                 min-width: 0;
                 color: var(--text);
-                font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
                 font-size: 12px;
-                line-height: 1.45;
-                white-space: pre-wrap;
-                word-break: break-word;
-                overflow: hidden;
-                max-height: 4.35em; /* ~3 lines */
+                line-height: 1.5;
+                white-space: pre;
+            }
+
+            /* Context lines (no matches) are dimmer */
+            .occ-line:not(.has-match) .occ-text {
+                color: var(--text-2);
             }
 
             .file-actions {
@@ -861,17 +873,20 @@ HTML_PAGE = '''<!DOCTYPE html>
                 color: var(--text-3);
             }
 
-            /* Highlight (query terms) */
-            .hl {
-                background: rgba(59,130,246,0.16);
-                border: 1px solid rgba(59,130,246,0.30);
-                padding: 0 2px;
+            /* Highlight: Two-Tier Gravity (Invariant IV: Will > Observation) */
+            
+            /* Tier 1: Core (Will) — Gravitational centers. User's query words. */
+            .hl-core {
+                background: rgba(255, 215, 0, 0.16);
+                border: 1px solid rgba(255, 215, 0, 0.40);
+                padding: 0 3px;
                 border-radius: 4px;
+                font-weight: 600;
             }
 
-            .hl-primary {
-                background: rgba(34,197,94,0.14);
-                border-color: rgba(34,197,94,0.30);
+            /* Tier 2: Resonant (Observation) — Context orbits. Expanded terms. */
+            .hl-resonant {
+                border-bottom: 2px solid rgba(59, 130, 246, 0.50);
             }
 
             /* Context tooltip (hover preview) */
@@ -1411,10 +1426,10 @@ HTML_PAGE = '''<!DOCTYPE html>
                         <div class="doc-section">
                             <h3>Add document</h3>
                             <div class="doc-upload" id="dropZone">
-                                <input type="file" id="fileInput" accept=".txt,.md" onchange="uploadFile(this)">
+                                <input type="file" id="fileInput" onchange="uploadFile(this)">
                                 <p>📄 Drag file here or click to upload</p>
                                 <p style="font-size: 12px; color: var(--text-3); margin-top: 8px;">
-                                    Supports .txt and .md files (words indexed via Condensation Law)
+                                    Any text file (UTF-8) — .py, .js, .md, .txt, .json, etc.
                                 </p>
                             </div>
                         </div>
@@ -1764,7 +1779,69 @@ HTML_PAGE = '''<!DOCTYPE html>
                 return best || String((needles && needles[0]) || '').trim().toLowerCase();
             }
 
-            function highlightLineHtml(text, needles, primaryNeedle) {
+            function highlightLineHtml(text, coreNeedles, resonantNeedles) {
+                // Two-Tier Gravity Highlighting (Invariant IV: Will > Observation)
+                // Core (Will) = user's query words -> hl-core (bright)
+                // Resonant (Observation) = expanded terms -> hl-resonant (underline)
+                const src = String(text || '');
+                if (!src) return '';
+                
+                const coreSet = new Set(normalizeNeedles(coreNeedles));
+                const resSet = new Set(normalizeNeedles(resonantNeedles).filter(n => !coreSet.has(n)));
+                const allNeedles = [...coreSet, ...resSet];
+                
+                if (!allNeedles.length) return escHtml(src);
+
+                // Sort by length DESC (longer first: "darkness" before "dark")
+                allNeedles.sort((a, b) => b.length - a.length);
+
+                // Filter to safe word chars only
+                const safeNeedles = allNeedles.filter(n => /^[a-z0-9]+$/i.test(n));
+                if (!safeNeedles.length) {
+                    return highlightLineHtmlFallback(text, [...coreSet, ...resSet], '');
+                }
+
+                // Build word boundary pattern - \\b in regex means word boundary
+                const WB = String.fromCharCode(92) + 'b';  // backslash + b = \b for regex
+                const patternStr = safeNeedles.map(n => WB + n + WB).join('|');
+                let regex;
+                try {
+                    regex = new RegExp('(' + patternStr + ')', 'gi');
+                } catch (e) {
+                    return escHtml(src);
+                }
+
+                // Find matches
+                const ranges = [];
+                let match;
+                while ((match = regex.exec(src)) !== null && ranges.length < 96) {
+                    ranges.push({
+                        start: match.index,
+                        end: match.index + match[0].length,
+                        needle: match[0].toLowerCase(),
+                        original: match[0]
+                    });
+                }
+
+                if (!ranges.length) return escHtml(src);
+
+                // Build HTML with tier-based classes
+                let out = '';
+                let pos = 0;
+                ranges.forEach(r => {
+                    if (r.start > pos) out += escHtml(src.slice(pos, r.start));
+                    // Invariant IV: Will > Observation in visual hierarchy
+                    const cls = coreSet.has(r.needle) ? 'hl-core' : 'hl-resonant';
+                    out += '<span class="' + cls + '">' + escHtml(r.original) + '</span>';
+                    pos = r.end;
+                });
+                if (pos < src.length) out += escHtml(src.slice(pos));
+                return out;
+            }
+
+
+            // Fallback for needles with special characters
+            function highlightLineHtmlFallback(text, needles, primaryNeedle) {
                 const src = String(text || '');
                 const hs = src.toLowerCase();
                 const ns = normalizeNeedles(needles);
@@ -1788,12 +1865,7 @@ HTML_PAGE = '''<!DOCTYPE html>
 
                 ranges.sort((a, b) => {
                     if (a.start !== b.start) return a.start - b.start;
-                    const la = (a.end - a.start);
-                    const lb = (b.end - b.start);
-                    if (la !== lb) return lb - la;
-                    const ap = (primary && a.needle === primary) ? 0 : 1;
-                    const bp = (primary && b.needle === primary) ? 0 : 1;
-                    return ap - bp;
+                    return (b.end - b.start) - (a.end - a.start);
                 });
 
                 const kept = [];
@@ -2337,20 +2409,22 @@ HTML_PAGE = '''<!DOCTYPE html>
 
 		                let occHtml = '';
 		                if (occ.length) {
+		                    // Two-Tier Gravity: Core = query words (Will), Resonant = expanded (Observation)
+		                    const coreWords = q.trim().toLowerCase().split(/\s+/).filter(w => w.length > 0);
+		                    const resonantWords = normalizeNeedles(signalWords.length ? signalWords : words);
+		                    
 		                    let lines = '';
 		                    occ.forEach(o => {
 		                        const lineNo = Number(o.line || 0) || 0;
 		                        const contentText = String(o.content || '').trim();
-		                        const matches = Array.isArray(o.matches) ? o.matches : [];
-		                        // Only highlight signal words (above 1/N baseline).
-		                        const needles = normalizeNeedles(matches.length ? matches : (signalWords.length ? signalWords : words));
-		                        const primary = pickPrimaryNeedle(contentText, needles);
-		                        const lineHtml = highlightLineHtml(contentText, needles, primary);
-		                        const needlesEnc = encodeURIComponent(JSON.stringify(needles || []));
-		                        const anchor = primary || (needles.length ? needles[0] : '');
 		                        if (!lineNo) return;
+		                        
+		                        const matches = Array.isArray(o.matches) ? o.matches : [];
+		                        const hasMatch = matches.length > 0;
+		                        const lineHtml = highlightLineHtml(contentText, coreWords, resonantWords);
+		                        const lineClass = hasMatch ? 'occ-line has-match' : 'occ-line';
 		                        lines += `
-		                            <div class="occ-line" data-doc="${escHtml(doc)}" data-line="${lineNo}" data-word="${escHtml(anchor)}" data-needles="${escHtml(needlesEnc)}">
+		                            <div class="${lineClass}" data-doc="${escHtml(doc)}" data-line="${lineNo}">
 		                                <div class="occ-no">${escHtml(String(lineNo))}</div>
 		                                <div class="occ-text">${lineHtml}</div>
 		                            </div>
@@ -2375,7 +2449,6 @@ HTML_PAGE = '''<!DOCTYPE html>
 		                            <button class="mini-btn" type="button" data-action="vscode" data-doc="${escHtml(doc)}">VS Code</button>
 		                            <button class="mini-btn" type="button" data-action="open" data-doc="${escHtml(doc)}">Open</button>
 		                            <a class="mini-link" href="${graphHref}" target="_blank">Graph</a>
-		                            <a class="mini-link" href="${docHref}">File page</a>
 		                        </div>
 		                        <div class="outline-slot" data-doc="${escHtml(doc)}"></div>
 		                    </div>
@@ -2435,6 +2508,21 @@ HTML_PAGE = '''<!DOCTYPE html>
 		                        });
 		                        return;
 		                    }
+		                });
+		            });
+
+		            // File card click -> open in VS Code at epicenter
+		            document.querySelectorAll('.file-card').forEach(card => {
+		                card.style.cursor = 'pointer';
+		                card.addEventListener('click', async (e) => {
+		                    // Don't open if clicking on buttons/links/details inside
+		                    if (e.target.closest('button, a, details, .occ-line')) return;
+		                    const doc = String(card.dataset.doc || '');
+		                    if (!doc) return;
+		                    // Get first occurrence line (epicenter)
+		                    const firstOcc = card.querySelector('.occ-line');
+		                    const line = firstOcc && firstOcc.dataset.line ? Number(firstOcc.dataset.line) : 1;
+		                    await openDoc('vscode', doc, line, '');
 		                });
 		            });
 
@@ -2763,11 +2851,14 @@ HTML_PAGE = '''<!DOCTYPE html>
                     )).join('') + '</div>')
                     : '';
 
+                // Two-tier highlighting: query words = core, ns = resonant
+                const queryWords = String(query || '').trim().toLowerCase().split(/\s+/).filter(w => w.length > 0);
+                
                 let rowsHtml = '';
                 for (let i = 0; i < ctxLines.length; i++) {
                     const ln = blockStart + i;
                     const isActive = actualLine ? (ln === actualLine) : (ln === requestedLine);
-                    const codeHtml = highlightLineHtml(String(ctxLines[i] || ''), ns, isActive ? primary : '');
+                    const codeHtml = highlightLineHtml(String(ctxLines[i] || ''), queryWords, ns);
                     rowsHtml += `
                         <div class="ctx-row${isActive ? ' active' : ''}">
                             <div class="ctx-no">${escHtml(String(ln))}</div>

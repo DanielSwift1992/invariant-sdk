@@ -63,6 +63,53 @@ Check Invariant connection and overlay stats.
 }
 ```
 
+### `locate(issue_text, max_results?)`
+**The main search tool.** Find relevant files by pasting error messages, function names, or any text.
+
+**USE INSTEAD OF:** `grep -rn`, `rg`, `find` (repo-wide searches)
+
+```
+> locate("separability_matrix")
+{
+  "files": [
+    {
+      "file": "separable.py",
+      "score": 2.0,
+      "occurrences": [
+        {"line": 32, "content": "from .separable import separability_matrix"},
+        {"line": 293, "content": "def separability_matrix(transform):"}
+      ]
+    }
+  ]
+}
+```
+
+### `list_docs()`
+List all indexed documents with stats.
+
+```
+> list_docs()
+{
+  "total_documents": 15,
+  "total_edges": 3247,
+  "documents": [
+    {"doc": "engine.py", "edges": 892, "concepts": 127}
+  ]
+}
+```
+
+### `scoped_grep(pattern, files, max_matches?)`
+Search for EXACT pattern in specific files. **Use after locate()** to refine search.
+
+```
+> scoped_grep("ASCIIValidator", "validators.py,test_validators.py")
+{
+  "matches": [
+    {"file": "validators.py", "line": 45, "content": "class ASCIIUsernameValidator:"}
+  ]
+}
+```
+
 ### `semantic_map(file_path)`
 Get semantic skeleton of a file — anchors, connections, structure.
 
