@@ -48,6 +48,13 @@ python crystal-miner/sidecar.py ingest --halo http://127.0.0.1:8080 my_private_d
 python crystal-miner/sidecar.py query --halo http://127.0.0.1:8080 "gpu requirements"
 ```
 
+## Web UI (Development)
+
+The web UI is served by `inv ui` (see `python/invariant_sdk/ui.py`) and loads its HTML templates from `python/ui_src/`:
+
+- `python/ui_src/main.html` (search + docs + ingest)
+- `python/ui_src/graph3d.html` (3D molecule view)
+
 ## Notes
 
 - Halo servers are read-only: no text, no inference — only `hash8 → neighbors`.
