@@ -535,6 +535,18 @@ def locate_files(
         word_contributions.sort(key=lambda x: (-float(x.get("contribution") or 0.0), str(x.get("word") or "").lower()))
         sorted_matches = [wc["word"] for wc in word_contributions]
 
+        # Semantic Bridges: Show expansion paths (V.3 Observation Law - make inference visible)
+        # Only include indirect matches where found_word ≠ source_word
+        semantic_bridges = []
+        for wc in word_contributions:
+            if not wc.get("is_direct") and wc.get("source_word"):
+                semantic_bridges.append({
+                    "from": wc["source_word"],
+                    "to": wc["word"],
+                    "weight": round(wc.get("weight", 0.0), 3),
+                    "contribution_pct": wc.get("percent", 0.0),
+                })
+
         ranked.append(
             (
                 doc,
@@ -543,6 +555,7 @@ def locate_files(
                     "n_matches": len(matched_hashes),
                     "matching_words": sorted_matches,
                     "word_contributions": word_contributions,
+                    "semantic_bridges": semantic_bridges,  # NEW: shows expansion logic
                     "score": round(total_score, 6),
                 },
             )
