@@ -147,12 +147,13 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     """Ingest documents into local overlay."""
     input_path = Path(args.path)
     output_path = Path(args.output) if args.output else Path("./.invariant/overlay.jsonl")
+    update_mode = getattr(args, 'update', False)
     
     if not input_path.exists():
         print(f"Error: Path not found: {input_path}")
         return 1
     
-    print(f"Invariant Ingest")
+    print(f"Invariant Ingest" + (" (--update mode)" if update_mode else ""))
     print(f"  Source: {input_path}")
     print(f"  Output: {output_path}")
     print()
@@ -214,6 +215,13 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         
         # Filter to text files only
         files = [f for f in files_after_gitignore if is_text_file(f)]
+    
+    # --update mode: filter to files modified after overlay
+    if update_mode and output_path.exists():
+        overlay_mtime = output_path.stat().st_mtime
+        files_before = len(files)
+        files = [f for f in files if f.stat().st_mtime > overlay_mtime]
+        print(f"  Update mode: {files_before} files total, {len(files)} modified since last ingest")
     
     print(f"Found {len(files)} files to process")
     print()
@@ -685,6 +693,11 @@ def main() -> int:
     ingest_parser.add_argument(
         "--output", "-o",
         help="Output overlay file (default: ./.invariant/overlay.jsonl)"
+    )
+    ingest_parser.add_argument(
+        "--update", "-u",
+        action="store_true",
+        help="Only reindex files modified since last ingest (incremental update)"
     )
     
     # ask command

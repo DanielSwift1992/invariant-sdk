@@ -130,7 +130,9 @@ class OverlayGraph:
             try:
                 with open(pkl_path, 'rb') as f:
                     data = pickle.load(f)
-                graph.edges = data.get('edges', graph.edges)
+                loaded_edges = data.get('edges', {})
+                # Wrap in defaultdict to preserve add_edge() functionality
+                graph.edges = defaultdict(list, loaded_edges)
                 graph.suppressed = data.get('suppressed', graph.suppressed)
                 graph.labels = data.get('labels', graph.labels)
                 graph.sources.add(str(pkl_path))
