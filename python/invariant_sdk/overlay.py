@@ -34,21 +34,27 @@ class OverlayEdge:
     """
     Single edge in overlay with ring classification and provenance.
     
+    MYCELIUM v2.3 Compliant.
+    
     ring values:
       'sigma'  - Observation from document (default, σ-proof capable)
       'lambda' - Ghost edge from Halo (navigation only)
       'eta'    - LLM hypothesis (unverified)
     
-    Provenance (Anchor Integrity Protocol):
-      'doc'      - Source document path (pointer to reality)
-      'line'     - Line number (1-indexed, approximate coordinate)
-      'ctx_hash' - Semantic checksum of anchor window (8 hex chars)
-                   Hash of normalized anchor ±2 words for drift detection.
-                   
-    Self-Healing States (see INVARIANTS.md):
-      - σ-fresh: ctx_hash matches current file content
-      - σ-relocated: ctx_hash found at different line (coordinate updated)
-      - σ-broken: ctx_hash not found (source changed, fact unverifiable)
+    Witness Bitmask (Physical Form):
+      0x01 ADJACENT  - Consecutive tokens in window
+      0x02 BRACKET   - A (B) pattern
+      0x04 EQUALS    - A = B or A: B pattern
+      0x08 GLOSSARY  - A, aka B pattern
+    
+    Anchor State (§1.4):
+      0 COHERENT    - ctx_hash matches at stored line
+      1 RELOCATED   - ctx_hash found in scan radius (±50)
+      2 DECOHERENT  - ctx_hash not found → fact invalid
+    
+    Live State (§1.5):
+      0 ACTIVE      - Fact active in Reactor
+      1 DEPLETED    - Fact superseded (logical tombstone)
     """
     tgt: str  # target hash8
     weight: float
@@ -57,6 +63,24 @@ class OverlayEdge:
     phase: str = "solid"  # solid/gas (target word phase)
     line: Optional[int] = None  # line number (1-indexed)
     ctx_hash: Optional[str] = None  # semantic checksum for drift detection
+    witness: int = 0  # structural bitmask (ADJACENT|BRACKET|EQUALS|GLOSSARY)
+    anchor_state: int = 0  # 0=COHERENT, 1=RELOCATED, 2=DECOHERENT
+    live_state: int = 0  # 0=ACTIVE, 1=DEPLETED
+    
+    # Witness bitmask constants
+    ADJACENT = 0x01
+    BRACKET = 0x02
+    EQUALS = 0x04
+    GLOSSARY = 0x08
+    
+    # Anchor state constants
+    COHERENT = 0
+    RELOCATED = 1
+    DECOHERENT = 2
+    
+    # Live state constants  
+    ACTIVE = 0
+    DEPLETED = 1
     
     def to_dict(self) -> Dict:
         d = {
@@ -65,6 +89,9 @@ class OverlayEdge:
             "doc": self.doc,
             "ring": self.ring,
             "phase": self.phase,
+            "witness": self.witness,
+            "anchor_state": self.anchor_state,
+            "live_state": self.live_state,
         }
         if self.line is not None:
             d["line"] = self.line
@@ -79,6 +106,21 @@ class OverlayEdge:
     def has_integrity(self) -> bool:
         """True if edge can be verified via ctx_hash (self-healing capable)."""
         return self.ctx_hash is not None and self.line is not None
+    
+    def is_provable(self) -> bool:
+        """
+        True if edge can participate in σ-proof (MYCELIUM v2.3 §1.5).
+        
+        Requires:
+          - anchor_state != DECOHERENT (source verifiable)
+          - live_state == ACTIVE (not tombstoned)
+          - has provenance (sigma ring + doc)
+        """
+        return (
+            self.anchor_state != self.DECOHERENT
+            and self.live_state == self.ACTIVE
+            and self.has_provenance()
+        )
 
 
 @dataclass
@@ -94,8 +136,11 @@ class OverlayGraph:
       - def: Define custom label for a hash8
     """
     
-    # src_hash -> list of edges
+    # src_hash -> list of edges (forward direction)
     edges: Dict[str, List[OverlayEdge]] = field(default_factory=lambda: defaultdict(list))
+    
+    # tgt_hash -> list of (src, edge) pairs (reverse direction for bidirectional lookup)
+    reverse_edges: Dict[str, List[Tuple[str, OverlayEdge]]] = field(default_factory=lambda: defaultdict(list))
     
     # Edges to suppress from global crystal: (src, tgt) pairs
     suppressed: Set[Tuple[str, str]] = field(default_factory=set)
@@ -135,6 +180,17 @@ class OverlayGraph:
                 graph.edges = defaultdict(list, loaded_edges)
                 graph.suppressed = data.get('suppressed', graph.suppressed)
                 graph.labels = data.get('labels', graph.labels)
+                
+                # Rebuild reverse_edges for bidirectional lookup (backward compat)
+                loaded_reverse = data.get('reverse_edges', {})
+                if loaded_reverse:
+                    graph.reverse_edges = defaultdict(list, loaded_reverse)
+                else:
+                    # Rebuild from edges if not in pickle
+                    for src, edge_list in graph.edges.items():
+                        for edge in edge_list:
+                            graph.reverse_edges[edge.tgt].append((src, edge))
+                
                 graph.sources.add(str(pkl_path))
                 return graph
             except Exception:
@@ -189,7 +245,10 @@ class OverlayGraph:
             if src and tgt:
                 new_edge = OverlayEdge(
                     tgt=tgt, weight=weight, doc=doc, ring=ring,
-                    phase=phase, line=line, ctx_hash=ctx_hash
+                    phase=phase, line=line, ctx_hash=ctx_hash,
+                    witness=int(entry.get("witness", 0)),
+                    anchor_state=int(entry.get("anchor_state", 0)),
+                    live_state=int(entry.get("live_state", 0)),
                 )
                 # Check for σ-conflicts (INVARIANTS.md line 126: both edges must be ∈ σ)
                 # λ-edges are navigation, not facts — they cannot conflict
@@ -199,6 +258,8 @@ class OverlayGraph:
                         if e.doc != doc:  # Different source = conflict
                             self.conflicts.append((e, new_edge))
                 self.edges[src].append(new_edge)
+                # Add reverse index for bidirectional lookup
+                self.reverse_edges[tgt].append((src, new_edge))
         
         elif op == "sub":
             src = entry.get("src", "")
@@ -293,9 +354,12 @@ class OverlayGraph:
         phase: str = "solid",
         line: Optional[int] = None,
         ctx_hash: Optional[str] = None,
+        witness: int = 0,
+        anchor_state: int = 0,
+        live_state: int = 0,
     ) -> None:
         """
-        Add a local edge with optional provenance (Anchor Integrity Protocol).
+        Add a local edge with optional provenance (MYCELIUM v2.3).
         
         Args:
             src: Source hash8
@@ -304,15 +368,18 @@ class OverlayGraph:
             doc: Source document path (provenance for σ-proof)
             ring: 'sigma' (default), 'lambda', or 'eta'
             phase: 'solid' (anchor) or 'gas' (LINK word)
-            line: Line number (1-indexed) — approximate coordinate
+            line: Line number (1-indexed)
             ctx_hash: Semantic checksum of anchor window (8 hex chars)
-                      Used for drift detection and self-healing.
+            witness: Structural bitmask (ADJACENT|BRACKET|EQUALS|GLOSSARY)
+            anchor_state: 0=COHERENT, 1=RELOCATED, 2=DECOHERENT
+            live_state: 0=ACTIVE, 1=DEPLETED
         
         Performance: O(1) append. Conflict detection moved to lazy check.
         """
         new_edge = OverlayEdge(
             tgt=tgt, weight=weight, doc=doc, ring=ring,
-            phase=phase, line=line, ctx_hash=ctx_hash
+            phase=phase, line=line, ctx_hash=ctx_hash,
+            witness=witness, anchor_state=anchor_state, live_state=live_state,
         )
         # O(1) append - conflict detection is now lazy (check on demand)
         self.edges[src].append(new_edge)
@@ -346,18 +413,37 @@ class OverlayGraph:
                 del self.edges[src]
         return deleted
     
-    def get_neighbors(self, src: str, ring_filter: Optional[str] = None) -> List[Dict]:
+    def get_neighbors(self, node: str, ring_filter: Optional[str] = None, bidirectional: bool = True) -> List[Dict]:
         """
-        Get local neighbors for a source node.
+        Get local neighbors for a node (bidirectional by default).
         
         Args:
-            src: Source hash8
+            node: Hash8 to find neighbors for
             ring_filter: If set, only return edges with this ring ('sigma', 'lambda', 'eta')
+            bidirectional: If True, return both outgoing AND incoming edges
+        
+        Returns:
+            List of neighbor dicts with 'tgt' (or 'src' for reverse), weight, doc, etc.
         """
-        edges = self.edges.get(src, [])
+        result = []
+        
+        # Forward edges: node -> neighbor
+        edges = self.edges.get(node, [])
         if ring_filter:
             edges = [e for e in edges if e.ring == ring_filter]
-        return [e.to_dict() for e in edges]
+        result.extend([e.to_dict() for e in edges])
+        
+        # Reverse edges: other -> node (bidirectional)
+        if bidirectional:
+            for src, edge in self.reverse_edges.get(node, []):
+                if ring_filter and edge.ring != ring_filter:
+                    continue
+                d = edge.to_dict()
+                d["tgt"] = src  # The "neighbor" is the source of this incoming edge
+                d["reverse"] = True  # Mark as reverse direction
+                result.append(d)
+        
+        return result
     
     def get_label(self, node: str) -> Optional[str]:
         """Get custom label for a node, if defined."""
