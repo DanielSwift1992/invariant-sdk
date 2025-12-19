@@ -106,6 +106,8 @@ class UIHandler(BaseHTTPRequestHandler):
             self.api_open(parsed.query)
         elif parsed.path == '/api/conflicts':
             self.api_conflicts()
+        elif parsed.path == '/api/bicameral':
+            self.api_bicameral(parsed.query)
         else:
             self.send_error(404)
     
@@ -1849,4 +1851,137 @@ class UIHandler(BaseHTTPRequestHandler):
         block_lines = lines[start_idx:end_idx + 1]
         
         return start_idx + 1, end_idx + 1, block_lines  # Return 1-indexed
+
+    # ========================================================================
+    # BICAMERAL SEARCH API — Crystal (structure) + Embeddings (associations)
+    # ========================================================================
+    
+    # Class-level Crystal cache
+    _crystal: 'BinaryCrystal' = None
+    _crystal_path: Optional[Path] = None
+    
+    def api_bicameral(self, query_string: str):
+        """
+        Bicameral Interference Visualization.
+        
+        Theory (INVARIANTS.md):
+          - Crystal (1-hop): Structural neighbors
+          - Embeddings (0-hop): Associative tunneling
+          - Local σ: Documentary facts
+          - Interference: When multiple sources confirm same neighbor
+        """
+        from .tokenize import tokenize_simple, dedupe_preserve_order
+        
+        params = urllib.parse.parse_qs(query_string or "")
+        q = (params.get('q', [''])[0] or '').strip()
+        
+        if not q:
+            self.send_json({'error': 'No query'}, 400)
+            return
+        
+        physics = UIHandler.physics
+        
+        query_words = dedupe_preserve_order(tokenize_simple(q))
+        if not query_words:
+            self.send_json({'error': 'No words in query'}, 400)
+            return
+        
+        try:
+            if not physics:
+                self.send_json({'error': 'Physics not initialized'}, 500)
+                return
+            
+            # Get bicameral expansion (Crystal + Embeddings + Local)
+            expanded = physics.expand_query(query_words)
+            
+            # Build visualization data
+            nodes = []
+            edges = []
+            node_ids = {}
+            
+            # Query words (T=0)
+            for i, word in enumerate(query_words):
+                node_id = f"q{i}"
+                node_ids[word] = node_id
+                nodes.append({
+                    "id": node_id,
+                    "label": word,
+                    "type": "query",
+                    "weight": 100,
+                })
+            
+            # Expanded terms
+            neighbor_idx = 0
+            stats = {"crystal": 0, "embedding": 0, "local": 0, "interference": 0}
+            
+            for h8, term in expanded.items():
+                if term.get("is_direct"):
+                    continue
+                
+                label = str(term.get("label") or h8[:8])
+                weight = float(term.get("weight") or 0)
+                sources = term.get("sources") or [term.get("source_word")]
+                source_type = term.get("source_type") or "crystal"
+                
+                node_id = f"n{neighbor_idx}"
+                neighbor_idx += 1
+                
+                # Determine node type for visualization
+                is_interference = len(sources) > 1 or "+" in source_type
+                is_embedding = "embedding" in source_type
+                is_local = "local" in source_type
+                is_crystal = "crystal" in source_type or source_type == "crystal"
+                
+                # Count ALL source types (not mutually exclusive)
+                if is_crystal:
+                    stats["crystal"] += 1
+                if is_embedding:
+                    stats["embedding"] += 1
+                if is_local:
+                    stats["local"] += 1
+                if is_interference:
+                    stats["interference"] += 1
+                
+                # Primary type for display
+                if is_interference:
+                    node_type = "interference"
+                elif is_local:
+                    node_type = "local"
+                elif is_embedding:
+                    node_type = "embedding"
+                else:
+                    node_type = "crystal"
+                
+                nodes.append({
+                    "id": node_id,
+                    "label": label,
+                    "type": node_type,
+                    "weight": round(weight * 100),
+                    "sources": sources,
+                    "source_type": source_type,  # Full type for tooltip
+                })
+                
+                # Edges from source query words
+                for src in sources:
+                    if src in node_ids:
+                        edges.append({
+                            "source": node_ids[src],
+                            "target": node_id,
+                            "weight": round(weight * 100),
+                        })
+            
+            # Get threshold from physics
+            threshold = float((physics.meta or {}).get("threshold", 0.5))
+            
+            self.send_json({
+                'query': q,
+                'query_words': query_words,
+                'nodes': nodes,
+                'edges': edges,
+                'stats': stats,
+                'threshold': round(threshold * 100),
+                'mode': 'bicameral',
+            })
+        except Exception as e:
+            self.send_json({'error': f'Expansion error: {str(e)}'}, 500)
 

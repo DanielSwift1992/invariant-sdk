@@ -22,17 +22,42 @@ from .merkle import (
 )
 from .physics import HaloPhysics, Concept
 from .export import to_dot, to_summary
-from .overlay import OverlayGraph, find_overlays
+from .overlay import OverlayGraph, OverlayEdge, find_overlays
+from .operators import (
+    VerifyResult,
+    InferResult,
+    verify_path,
+    reread_context_window,
+    compute_ctx_hash,
+    infer_DEF,
+    infer_SEQ,
+    infer_INHIB,
+    infer_GATE,
+    build_window_stats,
+    compute_dt_null_cache,
+)
 
-__version__ = "34.3.0"
+__version__ = "34.4.2"
 __all__ = [
     # Primary API (HaloPhysics)
     "HaloPhysics",
     "Concept",
     "OverlayGraph",
+    "OverlayEdge",
     "to_dot",
     "to_summary",
     "find_overlays",
+    # MYCELIUM v2.3 Operators
+    "VerifyResult",
+    "verify_path",
+    "reread_context_window",
+    "compute_ctx_hash",
+    "infer_DEF",
+    "infer_SEQ",
+    "infer_INHIB",
+    "infer_GATE",
+    "build_window_stats",
+    "compute_dt_null_cache",
     # Lower-level
     "BinaryCrystal",
     "HaloClient",

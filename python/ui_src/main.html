@@ -1477,6 +1477,581 @@
             margin-top: 4px;
         }
 
+        /* Thought Map - Horizontal Timeline */
+        .thought-map {
+            display: none;
+            flex-direction: column;
+            margin: 12px 0;
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            background: rgba(17, 17, 19, 0.6);
+            overflow: hidden;
+        }
+
+        .thought-map.show {
+            display: flex;
+        }
+
+        .thought-map-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 14px;
+            background: rgba(0, 0, 0, 0.2);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .thought-map-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-2);
+        }
+
+        .thought-map-legend {
+            display: flex;
+            gap: 12px;
+            font-size: 10px;
+            color: var(--text-3);
+        }
+
+        .thought-map-legend .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .thought-map-legend .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+        }
+
+        .thought-map-legend .dot.crystal {
+            background: #3b82f6;
+        }
+
+        .thought-map-legend .dot.embed {
+            background: #22c55e;
+        }
+
+        .thought-map-legend .dot.local {
+            background: #fbbf24;
+        }
+
+        .thought-timeline {
+            display: flex;
+            flex-direction: column;
+            overflow-x: auto;
+        }
+
+        .thought-header {
+            display: grid;
+            grid-template-columns: 80px 1fr 1fr 1fr;
+            gap: 8px;
+            padding: 8px 12px;
+            background: rgba(0, 0, 0, 0.3);
+            border-bottom: 1px solid var(--border);
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--text-3);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .thought-header .col-label {
+            text-align: center;
+        }
+
+        .thought-header .col-t0 {
+            color: var(--text-2);
+        }
+
+        .thought-header .col-t1 {
+            color: #93c5fd;
+        }
+
+        .thought-header .col-t2 {
+            color: #86efac;
+        }
+
+        .thought-header .col-local {
+            color: #fde047;
+        }
+
+        .thought-rows {
+            display: flex;
+            flex-direction: column;
+            gap: 1px;
+            padding: 6px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .thought-row {
+            display: grid;
+            grid-template-columns: 80px 1fr 1fr 1fr;
+            gap: 8px;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.02);
+            border-radius: 6px;
+            align-items: start;
+        }
+
+        .thought-word {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text);
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .thought-col {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            min-height: 24px;
+        }
+
+        .thought-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-family: 'JetBrains Mono', monospace;
+            white-space: nowrap;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .thought-chip.crystal {
+            background: rgba(59, 130, 246, 0.15);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            color: #93c5fd;
+        }
+
+        .thought-chip.embed {
+            background: rgba(34, 197, 94, 0.15);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            color: #86efac;
+        }
+
+        .thought-chip.local {
+            background: rgba(251, 191, 36, 0.15);
+            border: 1px solid rgba(251, 191, 36, 0.3);
+            color: #fde047;
+        }
+
+        /* Interference highlight - word appears in multiple sources */
+        .thought-chip.interference {
+            background: rgba(168, 85, 247, 0.2);
+            border: 2px solid rgba(168, 85, 247, 0.5);
+            color: #c4b5fd;
+            font-weight: 600;
+            box-shadow: 0 0 8px rgba(168, 85, 247, 0.3);
+        }
+
+        .thought-chip:hover {
+            filter: brightness(1.2);
+            transform: scale(1.02);
+        }
+
+        .thought-chip .score {
+            font-size: 9px;
+            opacity: 0.7;
+        }
+
+        .thought-chip .interference-badge {
+            font-size: 8px;
+            background: rgba(168, 85, 247, 0.4);
+            padding: 1px 4px;
+            border-radius: 6px;
+            margin-left: 2px;
+        }
+
+        .thought-empty {
+            color: var(--text-3);
+            font-size: 10px;
+            font-style: italic;
+        }
+
+        .thought-loading {
+            color: var(--text-3);
+            font-size: 12px;
+            padding: 12px;
+            text-align: center;
+        }
+
+        /* Interference Summary */
+        .interference-summary {
+            display: flex;
+            gap: 8px;
+            padding: 8px 12px;
+            background: rgba(168, 85, 247, 0.08);
+            border-top: 1px solid rgba(168, 85, 247, 0.2);
+            font-size: 11px;
+            color: #c4b5fd;
+        }
+
+        .interference-summary .label {
+            font-weight: 600;
+        }
+
+        /* Graph Visualization */
+        .graph-container {
+            display: flex;
+            gap: 12px;
+            padding: 12px;
+            min-height: 120px;
+        }
+
+        .graph-col {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            min-width: 100px;
+        }
+
+        .graph-sources {
+            flex: 0 0 auto;
+        }
+
+        .graph-targets {
+            flex: 1;
+            display: flex;
+            flex-direction: row;
+            flex-wrap: wrap;
+            gap: 6px;
+            align-content: flex-start;
+        }
+
+        .graph-col-header {
+            font-size: 10px;
+            font-weight: 600;
+            color: var(--text-3);
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .graph-node {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            border-radius: 8px;
+            font-size: 12px;
+            font-family: 'JetBrains Mono', monospace;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .graph-node.query {
+            background: rgba(59, 130, 246, 0.2);
+            border: 2px solid rgba(59, 130, 246, 0.5);
+            color: #93c5fd;
+            font-weight: 600;
+        }
+
+        .graph-node.crystal {
+            background: rgba(59, 130, 246, 0.1);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            color: #93c5fd;
+        }
+
+        .graph-node.local {
+            background: rgba(251, 191, 36, 0.15);
+            border: 1px solid rgba(251, 191, 36, 0.3);
+            color: #fde047;
+        }
+
+        .graph-node.interference {
+            background: rgba(168, 85, 247, 0.2);
+            border: 2px solid rgba(168, 85, 247, 0.5);
+            color: #c4b5fd;
+            font-weight: 600;
+            box-shadow: 0 0 10px rgba(168, 85, 247, 0.3);
+        }
+
+        .graph-node.embedding {
+            background: rgba(34, 197, 94, 0.15);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            color: #86efac;
+        }
+
+        .embed-badge {
+            background: rgba(34, 197, 94, 0.3);
+            color: #86efac;
+            font-size: 8px;
+            padding: 1px 4px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        .local-badge {
+            background: rgba(251, 191, 36, 0.3);
+            color: #fde047;
+            font-size: 8px;
+            padding: 1px 4px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+
+        /* Unified source badges */
+        .source-badge {
+            font-size: 9px;
+            padding: 2px 5px;
+            border-radius: 4px;
+            font-weight: 600;
+            margin-left: 4px;
+        }
+
+        .source-badge.embed {
+            background: rgba(34, 197, 94, 0.25);
+            color: #86efac;
+        }
+
+        .source-badge.ce {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.3), rgba(34, 197, 94, 0.3));
+            color: #a5b4fc;
+        }
+
+        .source-badge.local {
+            background: rgba(251, 191, 36, 0.25);
+            color: #fde047;
+        }
+
+        .source-badge.intf {
+            background: rgba(168, 85, 247, 0.25);
+            color: #c4b5fd;
+        }
+
+        /* Softer interference (no heavy purple glow) */
+        .graph-node.interference-soft {
+            background: rgba(148, 100, 230, 0.1);
+            border: 1px solid rgba(148, 100, 230, 0.3);
+            color: var(--text);
+        }
+
+        /* Stats bar - compact and subtle */
+        .stats-bar {
+            display: flex;
+            gap: 14px;
+            padding: 8px 14px;
+            background: rgba(0, 0, 0, 0.25);
+            border-top: 1px solid var(--border);
+            font-size: 11px;
+            color: var(--text-2);
+            font-family: 'JetBrains Mono', ui-monospace, monospace;
+        }
+
+        /* Colored stat items */
+        .stat-item.crystal {
+            color: #93c5fd;
+        }
+
+        .stat-item.embed {
+            color: #86efac;
+        }
+
+        .stat-item.local {
+            color: #fde047;
+        }
+
+        /* Source letters badge (CEL) */
+        .source-letters {
+            font-size: 9px;
+            padding: 1px 4px;
+            border-radius: 3px;
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-2);
+            font-weight: 600;
+            margin-left: 4px;
+        }
+
+        /* Interference count */
+        .intf-count {
+            font-size: 9px;
+            padding: 1px 4px;
+            border-radius: 3px;
+            background: rgba(168, 85, 247, 0.2);
+            color: #c4b5fd;
+            margin-left: 3px;
+        }
+
+        .graph-node:hover {
+            filter: brightness(1.2);
+            transform: scale(1.02);
+        }
+
+        .node-label {
+            font-weight: 500;
+        }
+
+        .node-weight {
+            font-size: 10px;
+            opacity: 0.7;
+        }
+
+        .graph-edges {
+            flex: 0 0 20px;
+            position: relative;
+        }
+
+        .stage-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+
+        .stage-label {
+            font-size: 10px;
+            font-weight: 700;
+            color: rgba(255, 255, 255, 0.4);
+            background: rgba(255, 255, 255, 0.1);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .stage-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text);
+        }
+
+        .stage-desc {
+            font-size: 10px;
+            color: var(--text-3);
+            font-style: italic;
+        }
+
+        .stage-arrow {
+            color: rgba(255, 255, 255, 0.2);
+            font-size: 16px;
+            position: absolute;
+            right: -16px;
+            top: 50%;
+            transform: translateY(-50%);
+        }
+
+        .embeddings-stage .stage-arrow {
+            display: none;
+        }
+
+        .bicameral-col {
+            padding: 14px;
+            border-radius: 12px;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .bicameral-col.crystal {
+            border: 1px solid rgba(59, 130, 246, 0.25);
+            background: rgba(59, 130, 246, 0.04);
+        }
+
+        .bicameral-col.embeddings {
+            border: 1px solid rgba(34, 197, 94, 0.25);
+            background: rgba(34, 197, 94, 0.04);
+        }
+
+        .bicameral-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 10px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        .bicameral-col.crystal .bicameral-header {
+            color: var(--accent);
+        }
+
+        .bicameral-col.embeddings .bicameral-header {
+            color: var(--success);
+        }
+
+        .bicameral-subtitle {
+            font-size: 11px;
+            color: var(--text-3);
+            font-weight: 400;
+            text-transform: none;
+            letter-spacing: normal;
+        }
+
+        .bicameral-words {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }
+
+        .bi-word {
+            display: inline-flex;
+            align-items: center;
+            padding: 4px 10px;
+            border-radius: 999px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.15s;
+            font-family: 'JetBrains Mono', ui-monospace, monospace;
+        }
+
+        .bi-word.crystal {
+            background: rgba(59, 130, 246, 0.12);
+            border: 1px solid rgba(59, 130, 246, 0.3);
+            color: var(--text);
+        }
+
+        .bi-word.crystal:hover {
+            background: rgba(59, 130, 246, 0.22);
+            border-color: rgba(59, 130, 246, 0.5);
+        }
+
+        .bi-word.embeddings {
+            background: rgba(34, 197, 94, 0.12);
+            border: 1px solid rgba(34, 197, 94, 0.3);
+            color: var(--text);
+        }
+
+        .bi-word.embeddings:hover {
+            background: rgba(34, 197, 94, 0.22);
+            border-color: rgba(34, 197, 94, 0.5);
+        }
+
+        .bi-word.query {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: var(--text);
+            cursor: default;
+        }
+
+        .bi-score {
+            font-size: 9px;
+            margin-left: 4px;
+            color: rgba(34, 197, 94, 0.7);
+            font-weight: 500;
+        }
+
+        .bicameral-empty {
+            color: var(--text-3);
+            font-size: 12px;
+            font-style: italic;
+        }
+
+        @media (max-width: 640px) {
+            .bicameral-panel {
+                flex-direction: column;
+            }
+
+            .stage-arrow {
+                display: none;
+            }
+        }
+
         @media (max-width: 820px) {
             .nav-meta {
                 display: none;
@@ -1582,6 +2157,19 @@
                         </div>
                         <button class="btn" id="searchBtn" onclick="search()">Locate</button>
                     </div>
+
+                    <!-- Thought Map - Horizontal Scroll Timeline -->
+                    <div class="thought-map" id="thoughtMap">
+                        <div class="thought-map-header">
+                            <span class="thought-map-title">🧠 Expansion</span>
+                        </div>
+                        <div class="thought-timeline" id="thoughtTimeline">
+                            <!-- Will be populated by JS with per-word rows -->
+                            <div class="thought-loading">Analyzing...</div>
+                        </div>
+                    </div>
+
+
 
                     <div id="content">
                         <div class="empty">
@@ -2414,6 +3002,9 @@
             searchBtn.disabled = true;
             content.innerHTML = '<div class="loading"><span class="spinner"></span>Searching...</div>';
 
+            // Fetch bicameral results in parallel
+            fetchBicameral(q);
+
             try {
                 let url = '/api/locate?q=' + encodeURIComponent(q);
                 if (selectedDoc) {
@@ -2435,7 +3026,112 @@
             }
         }
 
+        // Interference Graph: Query words → Neighbors with connections
+        const thoughtMap = document.getElementById('thoughtMap');
+        const thoughtTimeline = document.getElementById('thoughtTimeline');
+
+        async function fetchBicameral(query) {
+            if (!query) {
+                thoughtMap.classList.remove('show');
+                return;
+            }
+
+            // Show panel with loading state
+            thoughtMap.classList.add('show');
+            thoughtTimeline.innerHTML = '<div class="thought-loading">Analyzing...</div>';
+
+            try {
+                const res = await fetch('/api/bicameral?q=' + encodeURIComponent(query));
+                const data = await res.json();
+
+                if (data.error) {
+                    thoughtTimeline.innerHTML = '<div class="thought-loading">' + escHtml(data.error) + '</div>';
+                    return;
+                }
+
+                // Bicameral mode: Crystal + Embeddings + Local
+                const nodes = data.nodes || [];
+                const edges = data.edges || [];
+                const stats = data.stats || {};
+                const threshold = data.threshold || 50;
+
+                if (!nodes.length) {
+                    thoughtTimeline.innerHTML = '<div class="thought-loading">No expansion</div>';
+                    return;
+                }
+
+                // Separate query nodes and neighbor nodes
+                const queryNodes = nodes.filter(n => n.type === 'query');
+                const neighborNodes = nodes.filter(n => n.type !== 'query');
+
+                // Build visualization HTML - no QUERY column (visible in search box)
+                let html = '<div class="graph-container">';
+
+                // Expanded terms - horizontal flow
+                html += '<div class="graph-col graph-targets" style="width:100%;">';
+                for (const node of neighborNodes) {
+                    const nodeType = node.type || 'crystal';
+                    const sources = (node.sources || []).length;
+                    const st = node.source_type || '';
+
+                    // Simple logic: 1 source = color only, 2+ sources = letters
+                    let badge = '';
+                    const hasCrystal = st.includes('crystal') || nodeType === 'crystal';
+                    const hasEmbed = st.includes('embedding');
+                    const hasLocal = st.includes('local');
+                    const sourceCount = (hasCrystal ? 1 : 0) + (hasEmbed ? 1 : 0) + (hasLocal ? 1 : 0);
+
+                    // Only show letters if 2+ source types
+                    if (sourceCount >= 2) {
+                        let letters = '';
+                        if (hasCrystal) letters += 'C';
+                        if (hasEmbed) letters += 'E';
+                        if (hasLocal) letters += 'L';
+                        badge = `<span class="source-letters">${letters}</span>`;
+                    }
+
+                    // Interference count (multiple query words)
+                    if (sources > 1) badge += `<span class="intf-count">${sources}x</span>`;
+
+                    // Color class based on primary source
+                    let colorClass = 'crystal';
+                    if (hasLocal) colorClass = 'local';
+                    else if (hasEmbed && !hasCrystal) colorClass = 'embedding';
+
+                    html += `<div class="graph-node ${colorClass}" data-id="${node.id}" onclick="addToQuery('${escHtml(node.label)}')" title="${st || nodeType}">
+                        <span class="node-label">${escHtml(node.label)}</span>
+                        <span class="node-weight">${node.weight}%</span>
+                        ${badge}
+                    </div>`;
+                }
+                html += '</div>';
+
+                html += '</div>';
+
+                // Stats bar with legend colors
+                html += `<div class="stats-bar">
+                    <span class="stat-item crystal">◆ ${stats.crystal || 0} Crystal</span>
+                    <span class="stat-item embed">● ${stats.embedding || 0} Embed</span>
+                    <span class="stat-item local">● ${stats.local || 0} Local</span>
+                    ${stats.interference ? `<span class="stat-item">⚡ ${stats.interference} Intf</span>` : ''}
+                </div>`;
+
+                thoughtTimeline.innerHTML = html;
+            } catch (err) {
+                thoughtTimeline.innerHTML = '<div class="thought-loading">Error: ' + escHtml(err.message) + '</div>';
+            }
+        }
+
+        function addToQuery(word) {
+            const current = queryInput.value.trim();
+            if (!current.toLowerCase().includes(word.toLowerCase())) {
+                queryInput.value = current + ' ' + word;
+                search();
+            }
+        }
+
         let outlineCache = {};
+
 
         async function loadOutline(doc) {
             const key = String(doc || '');

@@ -155,6 +155,61 @@ class HaloClient:
             # Fallback: return hash prefixes
             return {h: None for h in hashes_list}
 
+    def get_mass_batch(self, hashes: Iterable[str]) -> Dict[str, Dict]:
+        """
+        Batch degree lookup for Mass_α calculation.
+        
+        Theory (INVARIANTS V.2):
+          Mass_α(w) = 1/log(2 + degree(w))
+        
+        Returns: {hash8: {"exists": bool, "degree": int, "mass": float}, ...}
+        """
+        hashes_list = list(hashes)
+        if not hashes_list:
+            return {}
+        
+        try:
+            payload = {"hashes": hashes_list}
+            resp = self._post_json("/v1/mass", payload) or {}
+            return resp.get("mass") or {}
+        except Exception:
+            # Fallback: assume unknown (mass=1.0)
+            return {h: {"exists": False, "degree": 0, "mass": 1.0} for h in hashes_list}
+
+
+    def get_bicameral(
+        self,
+        query: str,
+        *,
+        structure_k: int = 0,
+        liquid_k: int = 0,
+    ) -> Dict:
+        """
+        Bicameral Search: Crystal (structure) + Embeddings (associations).
+        
+        Calls /v1/bicameral on the server, which has embeddings loaded.
+        
+        Returns:
+            {
+                "query_words": [...],
+                "structure": [...],      # Crystal neighbors
+                "associations": [...],   # Embedding neighbors
+                "structure_count": int,
+                "association_count": int,
+            }
+        """
+        from urllib.parse import quote
+        
+        q = f"?q={quote(query)}"
+        if structure_k > 0:
+            q += f"&structure_k={structure_k}"
+        if liquid_k > 0:
+            q += f"&liquid_k={liquid_k}"
+        
+        resp = self._get_json(f"/v1/bicameral{q}") or {}
+        return resp
+
+
     def get_halo_exact(
         self,
         hash8: str,

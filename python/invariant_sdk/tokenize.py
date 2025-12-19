@@ -32,6 +32,23 @@ def _normalize(raw: str) -> str | None:
     return token
 
 
+def normalize_for_hash(text: str) -> str:
+    """
+    Normalize text for ctx_hash and dt calculation.
+    
+    MUST match operators.py:normalize_text() exactly!
+    Uses lowercase + strip punctuation + whitespace collapse.
+    
+    This shared normalization ensures:
+      - ctx_hash is stable under edits
+      - dt calculation is consistent with ctx_hash
+    """
+    text = text.lower()
+    # Remove all non-word, non-space characters
+    text = re.sub(r'[^\w\s]', '', text)
+    return ' '.join(text.split())
+
+
 def tokenize_simple(text: str) -> List[str]:
     """Extract normalized tokens from arbitrary text (may include duplicates)."""
     out: List[str] = []

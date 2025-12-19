@@ -510,7 +510,27 @@ def locate_files(
             idf = math.log(n_docs / df) if df and df < n_docs else 0.0
 
             mass = float(term.get("mass") or 1.0)
-            coupling = 1.0 if bool(term.get("is_direct")) else abs(float(term.get("weight") or 0.0))
+            
+            # Invariant IV: Will > Observation
+            # Hierarchy: σ (local) > α-Crystal (known) > α-Embeddings (felt)
+            # ε = 1/ln(N) where N = vocabulary size (derived, not magic)
+            n_vocab = 150000  # Default if physics unavailable
+            if physics is not None:
+                n_vocab = int((physics.meta or {}).get("n_labels", 150000))
+            epsilon = 1.0 / math.log(n_vocab) if n_vocab > 1 else 0.1
+            
+            source_type = str(term.get("source_type") or "crystal")
+            is_direct = bool(term.get("is_direct"))
+            weight = abs(float(term.get("weight") or 0.0))
+            
+            if is_direct:
+                coupling = 1.0  # Direct query words: full weight
+            elif source_type == "local":
+                coupling = 1.0  # Local σ-facts: full weight (documentary evidence)
+            elif source_type == "embedding":
+                coupling = weight * epsilon  # Global embeddings: dampened by ε
+            else:
+                coupling = weight  # Global Crystal expansion: use weight directly
 
             contribution = mass * idf * coupling
             total_score += contribution
@@ -520,7 +540,8 @@ def locate_files(
                     "hash8": h8,
                     "word": str(term.get("label") or h8[:8]),
                     "source_word": str(term.get("source_word") or ""),
-                    "is_direct": bool(term.get("is_direct")),
+                    "is_direct": is_direct,
+                    "source_type": source_type,
                     "mass": mass,
                     "df": df,
                     "idf": idf,
@@ -629,23 +650,31 @@ def locate_files(
             # Coordinate-based preview (Energy Law: use what we already know)
             # Use DIRECT query hashes for epicenter (Invariant IV: Will > Observation)
             direct_line_hashes = file_scores.get(doc_name, {}).get("direct_line_hashes") or {}
+            window_limit = 100  # Max contiguous lines to show (Energy Law: prevent token waste)
+            
             if direct_line_hashes:
                 # Find minimum enclosing interval (no magic radius)
                 epicenter, window_start, window_end = _find_epicenter(direct_line_hashes)
-                # Read the data-defined window (no magic radius)
-                occ = _read_context_window(
-                    path=path,
-                    start_line=window_start,
-                    end_line=window_end,
-                    signal_words=sig_words or (r.get("matching_words") or []),
-                    word_weights=weights or None,
-                )
-                if occ:
-                    r["occurrences"] = occ
-                    r["signal_words"] = sig_words
-                    r["epicenter"] = epicenter
-                    r["window"] = {"start": window_start, "end": window_end}
-                    continue
+                
+                # OPTIMIZATION: If window is too large, it means matches are too scattered.
+                # Fall back to grep-style scan to pick the best individual lines
+                # and avoid token waste (Invariant III: Energy Law).
+                if (window_end - window_start) <= window_limit:
+                    # Read the data-defined window (no magic radius)
+                    occ = _read_context_window(
+                        path=path,
+                        start_line=window_start,
+                        end_line=window_end,
+                        signal_words=sig_words or (r.get("matching_words") or []),
+                        word_weights=weights or None,
+                    )
+                    if occ:
+                        r["occurrences"] = occ
+                        r["signal_words"] = sig_words
+                        r["epicenter"] = epicenter
+                        r["window"] = {"start": window_start, "end": window_end}
+                        continue
+
             
             # Fallback: grep-style scan (for overlays without line provenance)
             occ = _scan_file_for_words(
