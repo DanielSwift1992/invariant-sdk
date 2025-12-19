@@ -270,7 +270,13 @@ def locate(issue_text: str, max_results: int = 0) -> str:
                     else:
                         gas_seeds.append((word, h8, mass))
                 else:
-                    unknown_words.append(word)
+                    # Grounding Principle: void (not in Crystal) → check overlay
+                    # If word exists in overlay → it's a real rare anchor (e.g., "Dabhol")
+                    # If not in overlay → it's likely a typo or garbage
+                    if _overlay and (h8 in _overlay.edges or h8 in _overlay.labels):
+                        solid_seeds.append((word, h8, 1.0))  # Max mass for unique anchors
+                    else:
+                        unknown_words.append(word)
         except Exception:
             # Crystal failed - treat all unknown as potential anchors
             for word in words_needing_crystal:
