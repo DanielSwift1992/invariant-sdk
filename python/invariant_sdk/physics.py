@@ -435,8 +435,13 @@ class HaloPhysics:
             mass_data = self._client.get_mass_batch(query_hashes)
             for h8 in query_hashes:
                 info = mass_data.get(h8, {})
-                phase = info.get("phase", "solid")  # default solid for backwards compat
                 mass = float(info.get("mass", 1.0))
+                # V.1 Condensation Law: Client-side enforcement
+                # Don't trust server phase blindly — verify against mean_mass
+                if mass < self.mean_mass:
+                    phase = "gas"  # Enforce: low mass = gas, regardless of server
+                else:
+                    phase = info.get("phase", "solid")
                 result[h8]["mass"] = mass
                 result[h8]["phase"] = phase
                 query_phases[h8] = phase

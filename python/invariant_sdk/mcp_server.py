@@ -238,49 +238,61 @@ def locate(issue_text: str, max_results: int = 0) -> str:
         _overlay_index = OverlayIndex.build(_overlay)
         _overlay_index_key = idx_key
 
-    # Step 1: Check which words exist in overlay (fast, no HTTP)
+
+    # Step 1: Get mass for ALL words from Crystal first (for V.1 classification)
+    # Theory: Overlay presence ≠ Solid. Must check mass against mean_mass.
+    all_hashes = list(word_hashes.values())
+    mass_by_hash: dict = {}
+    try:
+        batch_results, _http = _get_halo_meta_cached(all_hashes, chunk_size=4000)
+        for h8 in all_hashes:
+            result = batch_results.get(h8) or {}
+            if result.get('exists'):
+                meta = result.get('meta') or {}
+                degree = int(meta.get('degree_total') or 0)
+                mass = 1.0 / math.log(2 + max(0, degree)) if degree > 0 else 1.0
+            else:
+                mass = 1.0  # void words get max mass (will be grounded later)
+            mass_by_hash[h8] = mass
+    except Exception:
+        # Fallback: assume all have high mass
+        for h8 in all_hashes:
+            mass_by_hash[h8] = 1.0
+    
+    # Step 2: Classify words using V.1 Condensation Law
     overlay_known = set()
     for word, h8 in word_hashes.items():
-        # Deterministic: treat any overlay-present node as solid (it passed Phase Separation at ingest time).
-        if h8 in _overlay_index.known_hashes or h8 in (_overlay.labels or {}):
-            overlay_known.add(word)
-            solid_seeds.append((word, h8, 1.0))
+        mass = mass_by_hash.get(h8, 1.0)
+        is_in_overlay = h8 in _overlay_index.known_hashes or h8 in (_overlay.labels or {})
+        
+        # V.1: phase determined by mass, not by overlay presence
+        if mass >= _physics.mean_mass:
+            # Solid anchor (high mass)
+            solid_seeds.append((word, h8, mass))
+            if is_in_overlay:
+                overlay_known.add(word)
+        else:
+            # Gas (low mass) — even if in overlay!
+            gas_seeds.append((word, h8, mass))
+            if is_in_overlay:
+                overlay_known.add(word)
+
+
+    # Step 3: Handle void words (not in Crystal) — Grounding Principle
+    # Words with mass=1.0 that aren't in overlay are unknown (typos)
+    for word, h8 in word_hashes.items():
+        mass = mass_by_hash.get(h8, 1.0)
+        already_classified = any(w == word for w, _, _ in solid_seeds) or any(w == word for w, _, _ in gas_seeds)
+        if already_classified:
             continue
-        # Backward-compat: label-to-hash mapping (rare).
-        node = _overlay_index.label_to_hash.get(str(word).strip().lower())
-        if node:
-            overlay_known.add(word)
-            solid_seeds.append((word, node, 1.0))
-    
-    # Step 2: Only call Crystal for words NOT in overlay (if any)
-    words_needing_crystal = [w for w in unique_words if w not in overlay_known]
-    
-    if words_needing_crystal:
-        try:
-            crystal_hashes = {w: word_hashes[w] for w in words_needing_crystal}
-            batch_results, _http = _get_halo_meta_cached(crystal_hashes.values(), chunk_size=4000)
-            for word, h8 in crystal_hashes.items():
-                result = batch_results.get(h8) or {}
-                if result.get('exists'):
-                    meta = result.get('meta') or {}
-                    degree = int(meta.get('degree_total') or 0)
-                    mass = 1.0 / math.log(2 + max(0, degree)) if degree > 0 else 0
-                    if mass > _physics.mean_mass:
-                        solid_seeds.append((word, h8, mass))
-                    else:
-                        gas_seeds.append((word, h8, mass))
-                else:
-                    # Grounding Principle: void (not in Crystal) → check overlay
-                    # If word exists in overlay → it's a real rare anchor (e.g., "Dabhol")
-                    # If not in overlay → it's likely a typo or garbage
-                    if _overlay and (h8 in _overlay.edges or h8 in _overlay.labels):
-                        solid_seeds.append((word, h8, 1.0))  # Max mass for unique anchors
-                    else:
-                        unknown_words.append(word)
-        except Exception:
-            # Crystal failed - treat all unknown as potential anchors
-            for word in words_needing_crystal:
-                unknown_words.append(word)
+        
+        # Void word: not in Crystal batch results
+        if _overlay and (h8 in _overlay.edges or h8 in _overlay.labels):
+            # Grounding: void + overlay = solid anchor (rare real word)
+            solid_seeds.append((word, h8, 1.0))
+        else:
+            # Void + no overlay = unknown (typo or garbage)
+            unknown_words.append(word)
     
     # File discovery + bounded previews (shared engine with UI/CLI).
     # Pass _physics to enable Query Lensing (Halo neighbor expansion)
