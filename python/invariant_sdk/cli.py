@@ -239,7 +239,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     # Pass 1/2: scan files and collect unique words (bounded per file)
     # ------------------------------------------------------------------
     print("Pass 1/2: scanning files for vocabulary...")
-    per_file_words: dict[Path, list[str]] = {}
+    per_file_tokens: dict[Path, list[tuple]] = {}  # Cache tokens to avoid re-reading
     all_words: Set[str] = set()
 
     for i, file_path in enumerate(files, 1):
@@ -255,15 +255,14 @@ def cmd_ingest(args: argparse.Namespace) -> int:
         if len(tokens_with_pos) < 2:
             continue
 
+        # Cache full tokens (avoids re-reading in Pass 2)
+        per_file_tokens[file_path] = tokens_with_pos
+        
         words = [w for w, _, _, _ in tokens_with_pos]
-        unique_words = list(dict.fromkeys(words))[:200]  # keep existing bound
-        if not unique_words:
-            continue
-
-        per_file_words[file_path] = unique_words
+        unique_words = list(dict.fromkeys(words))[:200]
         all_words.update(unique_words)
 
-    print(f"  Files with tokens: {len(per_file_words)}/{len(files)}")
+    print(f"  Files with tokens: {len(per_file_tokens)}/{len(files)}")
     print(f"  Unique words (bounded): {len(all_words)}")
     print()
 
@@ -297,23 +296,18 @@ def cmd_ingest(args: argparse.Namespace) -> int:
     print()
 
     # ------------------------------------------------------------------
-    # Pass 2/2: build edges using cached crystal meta (no per-file HTTP)
+    # Pass 2/2: build edges using cached tokens + crystal meta (no I/O)
     # ------------------------------------------------------------------
     print("Pass 2/2: building overlay...")
-    for i, (file_path, unique_words) in enumerate(per_file_words.items(), 1):
-        if i == 1 or i % 50 == 0 or i == len(per_file_words):
-            print(f"  [{i}/{len(per_file_words)}] {file_path}")
+    for i, (file_path, tokens_with_pos) in enumerate(per_file_tokens.items(), 1):
+        if i == 1 or i % 50 == 0 or i == len(per_file_tokens):
+            print(f"  [{i}/{len(per_file_tokens)}] {file_path}")
 
-        try:
-            text = file_path.read_text(encoding="utf-8")
-        except Exception:
-            continue
+        # Extract unique words for phase classification (use cache)
+        words = [w for w, _, _, _ in tokens_with_pos]
+        unique_words = list(dict.fromkeys(words))[:200]
 
-        tokens_with_pos = tokenize_with_positions(text)
-        if len(tokens_with_pos) < 2:
-            continue
-
-        # Phase classification: word -> 'solid' | 'gas'
+        # Phase classification: word -> 'solid' | 'gas' (using cached batch_results)
         word_phases: dict[str, str] = {}
         for word in unique_words:
             h8 = word_to_hash.get(word)
@@ -350,8 +344,9 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             if src_phase == "gas" and tgt_phase == "gas":
                 continue
 
-            src_hash = hash8_hex(f"Ġ{src_word}")
-            tgt_hash = hash8_hex(f"Ġ{tgt_word}")
+            # Use cached word_to_hash (avoids re-hashing)
+            src_hash = word_to_hash.get(src_word) or hash8_hex(f"Ġ{src_word}")
+            tgt_hash = word_to_hash.get(tgt_word) or hash8_hex(f"Ġ{tgt_word}")
 
             # ALL document edges are σ (provable facts with doc:line provenance)
             ctx_hash = compute_ctx_hash(tokens_with_pos, j + 1, k=2)
