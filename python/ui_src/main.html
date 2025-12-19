@@ -988,11 +988,11 @@
 
         /* Tier 1: Core (Will) — Gravitational centers. User's query words. */
         .hl-core {
-            background: rgba(255, 215, 0, 0.16);
-            border: 1px solid rgba(255, 215, 0, 0.40);
-            padding: 0 3px;
-            border-radius: 4px;
+            background: rgba(255, 215, 0, 0.22);
+            border-radius: 2px;
             font-weight: 600;
+            -webkit-box-decoration-break: clone;
+            box-decoration-break: clone;
         }
 
         /* Tier 2: Resonant (Observation) — Context orbits. Expanded terms. */
@@ -2225,10 +2225,9 @@
                 <div class="mode-panel active" id="panel-search">
                     <div class="search-form">
                         <div class="search-wrapper">
-                            <div class="search-highlight" id="searchHighlight"></div>
                             <input type="text" class="search-input" id="query"
                                 placeholder="Paste issue text / error / symbol (e.g. separability_matrix)" autofocus
-                                oninput="handleInput(this.value); updateSearchHighlight(this.value)" autocomplete="off">
+                                oninput="handleInput(this.value)" autocomplete="off">
                             <div class="autocomplete" id="autocomplete"></div>
                         </div>
                         <button class="btn" id="searchBtn" onclick="search()">Locate</button>
@@ -3311,9 +3310,8 @@
             let html = `
 		                <div class="results">
 		                    <div class="result-header">
-		                        <h2>📄 Files for "${highlightQueryHtml(q)}"</h2>
+		                        <h2>📄 ${highlightQueryHtml(q)} <span style="font-weight:400;font-size:14px;color:var(--text-2);margin-left:12px;">${results.length} files</span></h2>
 		                        <div class="result-meta">
-		                            <span>Files: ${results.length}</span>
 		                            <span>Scope: ${escHtml(scope)}</span>
 		                        </div>
 		                    </div>
@@ -3389,7 +3387,9 @@
                     const resonantWords = [];  // Resonant = expanded terms beyond signal (none currently)
 
                     let lines = '';
-                    occ.forEach(o => {
+                    // Sort occurrences by line number for chronological order
+                    const sortedOcc = [...occ].sort((a, b) => (Number(a.line) || 0) - (Number(b.line) || 0));
+                    sortedOcc.forEach(o => {
                         const lineNo = Number(o.line || 0) || 0;
                         const contentText = String(o.content || '').trim();
                         if (!lineNo) return;
