@@ -431,14 +431,17 @@
             width: 100%;
             padding: 14px 18px;
             font-size: 16px;
-            background: var(--surface);
-            border: 1px solid var(--border);
+            background: transparent;
+            border: none;
             border-radius: 8px;
             color: var(--text);
         }
 
         .search-input:focus {
             outline: none;
+        }
+
+        .search-wrapper:focus-within {
             border-color: rgba(59, 130, 246, 0.7);
             box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
         }
@@ -467,6 +470,43 @@
         .search-wrapper {
             position: relative;
             flex: 1;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+        }
+
+        /* Live Gas/Solid highlighting in search input */
+        .search-highlight {
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            padding: 14px 18px;
+            font-size: 16px;
+            font-family: inherit;
+            white-space: pre;
+            overflow: hidden;
+            pointer-events: none;
+            color: transparent;
+            z-index: 1;
+        }
+
+        .search-input {
+            position: relative;
+            z-index: 2;
+            background: transparent;
+            caret-color: var(--text);
+        }
+
+        .search-highlight .hl-solid {
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        .search-highlight .hl-gas {
+            color: var(--text-2);
+            opacity: 0.7;
         }
 
         .autocomplete {
@@ -598,8 +638,8 @@
         }
 
         .query-gas {
-            color: var(--text-3);
-            opacity: 0.5;
+            color: var(--text-2);
+            opacity: 0.75;
             font-weight: 400;
         }
 
@@ -2185,9 +2225,10 @@
                 <div class="mode-panel active" id="panel-search">
                     <div class="search-form">
                         <div class="search-wrapper">
+                            <div class="search-highlight" id="searchHighlight"></div>
                             <input type="text" class="search-input" id="query"
                                 placeholder="Paste issue text / error / symbol (e.g. separability_matrix)" autofocus
-                                oninput="handleInput(this.value)" autocomplete="off">
+                                oninput="handleInput(this.value); updateSearchHighlight(this.value)" autocomplete="off">
                             <div class="autocomplete" id="autocomplete"></div>
                         </div>
                         <button class="btn" id="searchBtn" onclick="search()">Locate</button>
@@ -2887,6 +2928,30 @@
                 return;
             }
             debounceTimer = setTimeout(() => fetchSuggestions(value), 200);
+        }
+
+        // MYCELIUM v2.3: Live Gas/Solid highlighting in search input
+        const GAS_WORDS_INPUT = new Set(['the', 'a', 'an', 'to', 'in', 'on', 'at', 'of', 'for', 'and', 'or', 'is', 'it', 'be', 'was', 'were', 'are', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'this', 'that', 'with', 'from', 'by', 'as', 'but', 'not', 'no', 'so', 'if', 'my', 'your', 'his', 'her', 'its', 'our', 'their', 'all', 'any', 'some', 'what', 'which', 'who', 'how', 'when', 'where', 'why', 'wen', 'went', 'i', 'we', 'you', 'he', 'she', 'they']);
+
+        function updateSearchHighlight(value) {
+            const highlightDiv = document.getElementById('searchHighlight');
+            if (!highlightDiv) return;
+
+            if (!value) {
+                highlightDiv.innerHTML = '';
+                return;
+            }
+
+            const html = value.split(/(\s+)/).map(token => {
+                if (/^\s+$/.test(token)) return token; // preserve whitespace
+                const w = token.toLowerCase().replace(/[^a-z]/g, '');
+                if (!w) return escHtml(token);
+                const isGas = w.length <= 2 || GAS_WORDS_INPUT.has(w);
+                const cls = isGas ? 'hl-gas' : 'hl-solid';
+                return `<span class="${cls}">${escHtml(token)}</span>`;
+            }).join('');
+
+            highlightDiv.innerHTML = html;
         }
 
         async function fetchSuggestions(q) {
