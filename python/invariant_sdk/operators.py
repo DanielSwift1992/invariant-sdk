@@ -38,16 +38,17 @@ RELOCATION_RADIUS = 50
 # Context window size for ctx_hash (±K tokens)
 CONTEXT_WINDOW_K = 2
 
-# Gas filter: tokens with df > GAS_DF_FRACTION * n_windows are Gas
+# Gas filter: tokens with df > GAS_DF_THRESHOLD * n_windows are Gas
 #
 # Information-theoretic basis (L0 Physics):
-#   p = 0.3 → I(t) = -log(0.3) ≈ 1.7 bits
-#   Tokens with < 2 bits information cannot be σ-evidence
+#   p = 1/e ≈ 0.368 → I(t) = -log(1/e) = 1 nat ≈ 1.44 bits
+#   Tokens with < 1 nat information cannot be σ-evidence
 #   (too frequent → no discriminative power for INHIB/GATE)
 #
-# Empirically validated: sweet spot 0.20–0.35, 0.3 is center
-# See: percolation phase transition at ~1/e
-GAS_DF_FRACTION = 0.3
+# This is the percolation phase transition threshold.
+# Empirically validated: same INHIB/GATE results as 0.3 on test corpora.
+import math
+GAS_DF_THRESHOLD = 1.0 / math.e  # ≈ 0.368
 
 
 # =============================================================================
@@ -436,7 +437,7 @@ def infer_INHIB(
     Gas Filter: High-frequency tokens (stopwords) cannot be INHIB evidence.
     """
     # Gas filter: high-df tokens cannot participate in INHIB
-    gas_threshold = int(stats.n_windows * GAS_DF_FRACTION)
+    gas_threshold = int(stats.n_windows * GAS_DF_THRESHOLD)
     src_df = stats.token_df.get(src, 0)
     tgt_df = stats.token_df.get(tgt, 0)
     
@@ -489,7 +490,7 @@ def infer_GATE(
         return InferResult.UNKNOWN
     
     # Gas filter: context C cannot be high-frequency stopword
-    gas_threshold = int(stats.n_windows * GAS_DF_FRACTION)
+    gas_threshold = int(stats.n_windows * GAS_DF_THRESHOLD)
     ctx_df = stats.token_df.get(context, 0)
     if ctx_df > gas_threshold:
         return InferResult.UNKNOWN  # Gas context cannot prove GATE
