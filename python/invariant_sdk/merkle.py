@@ -82,6 +82,9 @@ def merkle_hash(node: Node) -> bytes:
     return h
 
 
+from functools import lru_cache
+
+@lru_cache(maxsize=1_000_000)
 def get_token_hash_bytes(token: str) -> bytes:
     """Canonical full 32‑byte Merkle identity for a token."""
     return merkle_hash(encode_string(token))
