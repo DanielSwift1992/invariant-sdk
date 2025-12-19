@@ -71,6 +71,62 @@ _halo_meta_cache: dict[str, dict] = {}
 _overlay_index = None
 _overlay_index_key: Optional[tuple] = None
 
+# Persistent disk cache for Crystal responses (1M scale optimization)
+import sqlite3
+from pathlib import Path
+
+class _DiskCache:
+    """SQLite-backed persistent cache for Crystal HTTP responses."""
+    
+    def __init__(self, path: Optional[Path] = None):
+        if path is None:
+            path = Path.home() / ".invariant" / "crystal_cache.db"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(str(path), check_same_thread=False)
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS cache (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+        self.conn.commit()
+    
+    def get(self, key: str) -> Optional[dict]:
+        cur = self.conn.execute("SELECT value FROM cache WHERE key = ?", (key,))
+        row = cur.fetchone()
+        if row:
+            import json
+            return json.loads(row[0])
+        return None
+    
+    def set(self, key: str, value: dict):
+        import json
+        self.conn.execute(
+            "INSERT OR REPLACE INTO cache (key, value) VALUES (?, ?)",
+            (key, json.dumps(value))
+        )
+        self.conn.commit()
+    
+    def get_many(self, keys: list) -> dict:
+        """Batch get for multiple keys."""
+        if not keys:
+            return {}
+        placeholders = ",".join("?" * len(keys))
+        cur = self.conn.execute(
+            f"SELECT key, value FROM cache WHERE key IN ({placeholders})",
+            keys
+        )
+        import json
+        return {row[0]: json.loads(row[1]) for row in cur.fetchall()}
+
+_disk_cache: Optional[_DiskCache] = None
+
+def _get_disk_cache() -> _DiskCache:
+    global _disk_cache
+    if _disk_cache is None:
+        _disk_cache = _DiskCache()
+    return _disk_cache
+
 
 def _ensure_initialized():
     """Lazy initialization of physics and overlay."""
@@ -104,7 +160,12 @@ def _ensure_initialized():
 
 def _get_halo_meta_cached(hashes, *, chunk_size: int = 4000) -> tuple[dict[str, dict], int]:
     """
-    Meta-only Halo lookup with in-process cache + chunking.
+    Meta-only Halo lookup with in-process cache + disk cache + chunking.
+    
+    Cache hierarchy:
+      1. In-memory dict (_halo_meta_cache) - fastest
+      2. Disk SQLite (_disk_cache) - survives restart
+      3. HTTP to Crystal server - slowest
 
     Returns:
       (results_by_hash8, http_requests_made)
@@ -114,16 +175,31 @@ def _get_halo_meta_cached(hashes, *, chunk_size: int = 4000) -> tuple[dict[str, 
         return {}, 0
 
     global _halo_meta_cache
+    disk_cache = _get_disk_cache()
 
     hashes_list = [str(h).lower() for h in hashes]
-    missing = [h for h in hashes_list if h and h not in _halo_meta_cache]
-
+    
+    # Step 1: Check memory cache
+    missing_from_memory = [h for h in hashes_list if h and h not in _halo_meta_cache]
+    
+    # Step 2: Check disk cache for memory misses
+    if missing_from_memory:
+        disk_hits = disk_cache.get_many(missing_from_memory)
+        _halo_meta_cache.update(disk_hits)  # Promote to memory
+        missing_from_disk = [h for h in missing_from_memory if h not in disk_hits]
+    else:
+        missing_from_disk = []
+    
+    # Step 3: HTTP for disk misses
     http_requests = 0
-    for start in range(0, len(missing), int(chunk_size)):
+    for start in range(0, len(missing_from_disk), int(chunk_size)):
         http_requests += 1
-        chunk = missing[start : start + int(chunk_size)]
+        chunk = missing_from_disk[start : start + int(chunk_size)]
         resp = _physics._client.get_halo_pages(chunk, limit=0) or {}
         _halo_meta_cache.update(resp)
+        # Persist to disk for future sessions
+        for h, data in resp.items():
+            disk_cache.set(h, data)
 
     return {h: (_halo_meta_cache.get(h) or {}) for h in hashes_list}, http_requests
 

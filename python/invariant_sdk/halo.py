@@ -16,12 +16,16 @@ from urllib.request import Request, urlopen
 
 from .merkle import get_token_hash_bytes
 
+# LRU cache for hash functions (1M unique tokens is typical vocabulary)
+from functools import lru_cache
 
+@lru_cache(maxsize=1_000_000)
 def hash8_hex_merkle(token: str) -> str:
     """Canonical address (v3+): first 8 bytes of Merkle(token)."""
     return get_token_hash_bytes(token)[:8].hex()
 
 
+@lru_cache(maxsize=1_000_000)
 def hash8_hex(token: str) -> str:
     """hash8 address for a token (v3+ Merkle)."""
     return hash8_hex_merkle(token)
