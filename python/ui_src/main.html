@@ -3282,10 +3282,12 @@
 
                 let occHtml = '';
                 if (occ.length) {
-                    // V.3 Observation Law: Only signal_words (filtered by contribution > 1/N) get highlighted
-                    // Previously: coreWords = ALL query words (violated V.3 - gas words like 'I', 'the' were highlighted)
-                    // Now: coreWords = signal_words (already filtered by engine per V.3)
-                    const coreWords = normalizeNeedles(signalWords.length ? signalWords : words);
+                    // MYCELIUM v2.3: Highlight both query words AND expanded signal words
+                    // Query words: dark, woods (original input)
+                    // Signal words: darkness, wood (expanded by engine)
+                    const queryWords = q.split(/\s+/).filter(w => w.length > 1);
+                    const expandedWords = signalWords.length ? signalWords : words;
+                    const coreWords = normalizeNeedles([...queryWords, ...expandedWords]);
                     const resonantWords = [];  // Resonant = expanded terms beyond signal (none currently)
 
                     let lines = '';
