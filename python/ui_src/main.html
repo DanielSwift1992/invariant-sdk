@@ -3255,8 +3255,10 @@
                         const pct = Number(wc.percent || 0);
                         const isDirect = !!wc.is_direct;
                         const src = String(wc.source_word || '').trim();
-                        const cls = (kind === 'signal') ? 'word-pill signal' : 'word-pill noise';
-                        const titleBits = [`${word}: ${pct.toFixed(1)}%`];
+                        // MYCELIUM v2.3: Signal=Solid (discriminative), Noise=Gas (stopwords)
+                        const phaseClass = (kind === 'signal') ? 'solid' : 'gas';
+                        const cls = `word-pill ${phaseClass}`;
+                        const titleBits = [`${word}: ${pct.toFixed(1)}%`, kind === 'signal' ? '(solid)' : '(gas)'];
                         if (!isDirect && src && src !== word) titleBits.push(`from ${src}`);
                         const srcHtml = (!isDirect && src && src !== word) ? `<span class="src">↝${escHtml(src)}</span>` : '';
                         return `<span class="${cls}" title="${escHtml(titleBits.join(' • '))}" style="--pct:${pct};">${escHtml(word)}<span class="pct">${escHtml(pct.toFixed(1) + '%')}</span>${srcHtml}</span>`;
