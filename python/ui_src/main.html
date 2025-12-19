@@ -591,6 +591,18 @@
             color: var(--text-2);
         }
 
+        /* MYCELIUM v2.3: Query word highlighting (Gas/Solid phase) */
+        .query-solid {
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        .query-gas {
+            color: var(--text-3);
+            opacity: 0.5;
+            font-weight: 400;
+        }
+
         .result-meta {
             display: flex;
             gap: 16px;
@@ -3214,10 +3226,27 @@
             const q = String(data.query || queryInput.value || '').trim();
             const scope = selectedDoc ? selectedDoc : 'all';
 
+            // MYCELIUM v2.3: Highlight query to show understanding
+            // Solid words = bright (discriminative), Gas words = dim (stopwords)
+            const GAS_WORDS_QUERY = new Set(['the', 'a', 'an', 'to', 'in', 'on', 'at', 'of', 'for', 'and', 'or', 'is', 'it', 'be', 'was', 'were', 'are', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'this', 'that', 'with', 'from', 'by', 'as', 'but', 'not', 'no', 'so', 'if', 'my', 'your', 'his', 'her', 'its', 'our', 'their', 'all', 'any', 'some', 'what', 'which', 'who', 'how', 'when', 'where', 'why', 'wen', 'went', 'i', 'we', 'you', 'he', 'she', 'they']);
+
+            const highlightQueryHtml = (query) => {
+                return query.split(/\s+/).map(word => {
+                    const w = word.toLowerCase().replace(/[^a-z]/g, '');
+                    if (!w) return escHtml(word);
+                    const isGas = w.length <= 2 || GAS_WORDS_QUERY.has(w);
+                    if (isGas) {
+                        return `<span class="query-gas">${escHtml(word)}</span>`;
+                    } else {
+                        return `<span class="query-solid">${escHtml(word)}</span>`;
+                    }
+                }).join(' ');
+            };
+
             let html = `
 		                <div class="results">
 		                    <div class="result-header">
-		                        <h2>📄 Files for "${escHtml(q)}"</h2>
+		                        <h2>📄 Files for "${highlightQueryHtml(q)}"</h2>
 		                        <div class="result-meta">
 		                            <span>Files: ${results.length}</span>
 		                            <span>Scope: ${escHtml(scope)}</span>
