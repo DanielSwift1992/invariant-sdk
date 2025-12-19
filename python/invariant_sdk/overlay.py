@@ -154,6 +154,9 @@ class OverlayGraph:
     # Conflicts: [(edge1, edge2), ...] where both claim same src->tgt with different values
     conflicts: List[Tuple[OverlayEdge, OverlayEdge]] = field(default_factory=list)
     
+    # Doc to source nodes mapping for fast deletion (Optimization V.3.1)
+    doc_to_nodes: Dict[str, Set[str]] = field(default_factory=lambda: defaultdict(set))
+    
     @classmethod
     def load(cls, path: Path) -> "OverlayGraph":
         """Load overlay from .pkl (binary, fast) or .jsonl (text, slow).
@@ -190,6 +193,17 @@ class OverlayGraph:
                     for src, edge_list in graph.edges.items():
                         for edge in edge_list:
                             graph.reverse_edges[edge.tgt].append((src, edge))
+                
+                # Load doc_to_nodes index (O(1) deletion) or rebuild
+                loaded_doc_index = data.get('doc_to_nodes', {})
+                if loaded_doc_index:
+                    graph.doc_to_nodes = defaultdict(set, {k: set(v) for k, v in loaded_doc_index.items()})
+                else:
+                    # Rebuild from edges if not in pickle (backward compat)
+                    for src, edge_list in graph.edges.items():
+                        for edge in edge_list:
+                            if edge.doc:
+                                graph.doc_to_nodes[edge.doc].add(src)
                 
                 graph.sources.add(str(pkl_path))
                 return graph
@@ -260,6 +274,9 @@ class OverlayGraph:
                 self.edges[src].append(new_edge)
                 # Add reverse index for bidirectional lookup
                 self.reverse_edges[tgt].append((src, new_edge))
+                # Add doc index for O(1) deletion
+                if doc:
+                    self.doc_to_nodes[doc].add(src)
         
         elif op == "sub":
             src = entry.get("src", "")
@@ -342,6 +359,7 @@ class OverlayGraph:
                 'edges': dict(self.edges),  # Convert defaultdict to dict
                 'suppressed': self.suppressed,
                 'labels': self.labels,
+                'doc_to_nodes': dict(self.doc_to_nodes),  # O(1) doc deletion index
             }, f, protocol=pickle.HIGHEST_PROTOCOL)
     
     def add_edge(
@@ -383,6 +401,9 @@ class OverlayGraph:
         )
         # O(1) append - conflict detection is now lazy (check on demand)
         self.edges[src].append(new_edge)
+        # O(1) doc index update for fast deletion
+        if doc:
+            self.doc_to_nodes[doc].add(src)
     
     def suppress_edge(self, src: str, tgt: str) -> None:
         """Suppress a global edge (hide from results)."""
@@ -402,15 +423,22 @@ class OverlayGraph:
             Number of edges deleted
         
         Theory: Conservation Law - explicit deletion only (no silent evaporation).
+        Performance: O(NodesInDoc) using doc_to_nodes index.
         """
+        if doc not in self.doc_to_nodes:
+            return 0
+            
         deleted = 0
-        for src in list(self.edges.keys()):
+        nodes = list(self.doc_to_nodes[doc])
+        for src in nodes:
             original_len = len(self.edges[src])
             self.edges[src] = [e for e in self.edges[src] if e.doc != doc]
             deleted += original_len - len(self.edges[src])
             # Clean up empty source nodes
             if not self.edges[src]:
                 del self.edges[src]
+        
+        del self.doc_to_nodes[doc]
         return deleted
     
     def get_neighbors(self, node: str, ring_filter: Optional[str] = None, bidirectional: bool = True) -> List[Dict]:
