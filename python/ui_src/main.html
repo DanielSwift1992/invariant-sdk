@@ -3282,10 +3282,14 @@
 
                 let occHtml = '';
                 if (occ.length) {
-                    // MYCELIUM v2.3: Highlight both query words AND expanded signal words
-                    // Query words: dark, woods (original input)
-                    // Signal words: darkness, wood (expanded by engine)
-                    const queryWords = q.split(/\s+/).filter(w => w.length > 1);
+                    // MYCELIUM v2.3: Gas filter for text highlighting
+                    // Only Solid words (not stopwords) should be highlighted in snippets
+                    const GAS_WORDS = new Set(['the', 'a', 'an', 'to', 'in', 'on', 'at', 'of', 'for', 'and', 'or', 'is', 'it', 'be', 'was', 'were', 'are', 'been', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should', 'may', 'might', 'can', 'this', 'that', 'with', 'from', 'by', 'as', 'but', 'not', 'no', 'so', 'if', 'my', 'your', 'his', 'her', 'its', 'our', 'their', 'all', 'any', 'some', 'what', 'which', 'who', 'how', 'when', 'where', 'why', 'wen', 'went']);
+
+                    // Filter query words to only include Solid (non-Gas) words
+                    const queryWords = q.split(/\s+/)
+                        .map(w => w.toLowerCase())
+                        .filter(w => w.length > 2 && !GAS_WORDS.has(w));
                     const expandedWords = signalWords.length ? signalWords : words;
                     const coreWords = normalizeNeedles([...queryWords, ...expandedWords]);
                     const resonantWords = [];  // Resonant = expanded terms beyond signal (none currently)
