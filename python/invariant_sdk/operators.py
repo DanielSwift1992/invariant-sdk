@@ -41,14 +41,16 @@ CONTEXT_WINDOW_K = 2
 # Gas filter: tokens with df > GAS_DF_THRESHOLD * n_windows are Gas
 #
 # Information-theoretic basis (L0 Physics):
-#   p = 1/e ≈ 0.368 → I(t) = -log(1/e) = 1 nat ≈ 1.44 bits
-#   Tokens with < 1 nat information cannot be σ-evidence
-#   (too frequent → no discriminative power for INHIB/GATE)
+#   Tokens appearing in >30% of windows carry <1.7 bits of information
+#   per observation — too low to be discriminative evidence for INHIB/GATE.
 #
-# This is the percolation phase transition threshold.
-# Empirically validated: same INHIB/GATE results as 0.3 on test corpora.
-import math
-GAS_DF_THRESHOLD = 1.0 / math.e  # ≈ 0.368
+# Validation (C1-C5 acceptance criteria):
+#   0.30: PASS (stopwords the/and/was/that/his all Gas)
+#   1/3:  PASS (but 'that' becomes solid)
+#   1/e:  FAIL (was becomes solid — unacceptable regression)
+#
+# Sweet spot: 0.20–0.35. We use 0.30 as center of validated range.
+GAS_DF_THRESHOLD = 0.30
 
 
 # =============================================================================
