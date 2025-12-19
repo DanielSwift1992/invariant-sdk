@@ -546,24 +546,9 @@ class HaloPhysics:
         
         # 6) LOCAL OVERLAY (σ): Mark words that have documentary proof
         # Theory: σ provides PROOF (provenance), not expansion
-        # We check which Crystal/Embedding words exist in overlay with doc reference
         if self._overlay:
-            # Build lookup: which hashes exist in overlay with doc provenance
-            overlay_lookup: Dict[str, str] = {}  # hash8 -> doc
-            
-            # Check forward edges (src -> tgt)
-            for src, edge_list in self._overlay.edges.items():
-                for edge in edge_list:
-                    if edge.doc:  # Has provenance
-                        overlay_lookup[src] = edge.doc
-                        overlay_lookup[edge.tgt] = edge.doc
-            
-            # Check reverse edges too
-            for tgt, src_list in self._overlay.reverse_edges.items():
-                for src, edge in src_list:
-                    if edge.doc:
-                        overlay_lookup[tgt] = edge.doc
-                        overlay_lookup[src] = edge.doc
+            # Optimization V.3.2: Use cached provenance map instead of O(E) scan
+            overlay_lookup = self._overlay.provenance_map
             
             # Mark existing results that have σ-proof
             local_count = 0

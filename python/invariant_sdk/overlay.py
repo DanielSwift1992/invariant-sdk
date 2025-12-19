@@ -157,6 +157,27 @@ class OverlayGraph:
     # Doc to source nodes mapping for fast deletion (Optimization V.3.1)
     doc_to_nodes: Dict[str, Set[str]] = field(default_factory=lambda: defaultdict(set))
     
+    # Private cache for provenance_map (cleared on mutations)
+    _provenance_cache: Optional[Dict[str, str]] = field(default=None, repr=False)
+    
+    @property
+    def provenance_map(self) -> Dict[str, str]:
+        """
+        O(1) lookup: hash8 → doc (Optimization V.3.2).
+        
+        Cached property. Rebuilds only when overlay mutates.
+        Used by physics.expand_query for LOCAL OVERLAY marking.
+        """
+        if self._provenance_cache is None:
+            cache: Dict[str, str] = {}
+            for src, edge_list in self.edges.items():
+                for edge in edge_list:
+                    if edge.doc:
+                        cache[src] = edge.doc
+                        cache[edge.tgt] = edge.doc
+            self._provenance_cache = cache
+        return self._provenance_cache
+    
     @classmethod
     def load(cls, path: Path) -> "OverlayGraph":
         """Load overlay from .pkl (binary, fast) or .jsonl (text, slow).
@@ -404,6 +425,8 @@ class OverlayGraph:
         # O(1) doc index update for fast deletion
         if doc:
             self.doc_to_nodes[doc].add(src)
+            # Invalidate provenance_cache (V.3.2)
+            self._provenance_cache = None
     
     def suppress_edge(self, src: str, tgt: str) -> None:
         """Suppress a global edge (hide from results)."""
@@ -439,6 +462,8 @@ class OverlayGraph:
                 del self.edges[src]
         
         del self.doc_to_nodes[doc]
+        # Invalidate provenance_cache (V.3.2)
+        self._provenance_cache = None
         return deleted
     
     def get_neighbors(self, node: str, ring_filter: Optional[str] = None, bidirectional: bool = True) -> List[Dict]:
