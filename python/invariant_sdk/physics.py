@@ -349,6 +349,11 @@ class HaloPhysics:
         threshold = float(self.meta.get("threshold") or 0.0)
         
         # 1) Normalize query words → T=0
+        # FIX: Handle string input (prevents 'alphabet bug' — iterating chars)
+        if isinstance(words, str):
+            import re
+            words = re.findall(r"[\w']+|[^\w\s]", words)
+        
         # Try multiple case variants since tokenizers preserve case (e.g. ĠPotter vs Ġpotter)
         query_words: List[str] = []
         query_hashes: List[str] = []

@@ -285,13 +285,8 @@ class OverlayGraph:
                     anchor_state=int(entry.get("anchor_state", 0)),
                     live_state=int(entry.get("live_state", 0)),
                 )
-                # Check for σ-conflicts (INVARIANTS.md line 126: both edges must be ∈ σ)
-                # λ-edges are navigation, not facts — they cannot conflict
-                if ring == "sigma":
-                    existing = [e for e in self.edges[src] if e.tgt == tgt and e.ring == "sigma"]
-                    for e in existing:
-                        if e.doc != doc:  # Different source = conflict
-                            self.conflicts.append((e, new_edge))
+                # O(1) append — conflict detection is lazy (via get_conflicts)
+                # This avoids O(N²) on JSONL load (Supercharged fix)
                 self.edges[src].append(new_edge)
                 # Add reverse index for bidirectional lookup
                 self.reverse_edges[tgt].append((src, new_edge))

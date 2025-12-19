@@ -542,6 +542,7 @@ def locate_files(
                     "source_word": str(term.get("source_word") or ""),
                     "is_direct": is_direct,
                     "source_type": source_type,
+                    "phase": str(term.get("phase") or "solid"),  # Supercharged: expose gas/solid
                     "mass": mass,
                     "df": df,
                     "idf": idf,
