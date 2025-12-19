@@ -24,8 +24,8 @@ def _template_dir() -> Path:
     )
 
 
-@lru_cache(maxsize=8)
 def _read_template(name: str) -> str:
+    """Read HTML template fresh each time (no cache = dev-friendly)."""
     p = _template_dir() / name
     return p.read_text(encoding="utf-8")
 
