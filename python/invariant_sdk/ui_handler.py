@@ -108,6 +108,8 @@ class UIHandler(BaseHTTPRequestHandler):
             self.api_conflicts()
         elif parsed.path == '/api/bicameral':
             self.api_bicameral(parsed.query)
+        elif parsed.path == '/api/analyze':
+            self.api_analyze(parsed.query)
         else:
             self.send_error(404)
     
@@ -1985,3 +1987,120 @@ class UIHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_json({'error': f'Expansion error: {str(e)}'}, 500)
 
+    def api_analyze(self, query_string: str):
+        """
+        Analyze document text for Gas/Solid token classification (MYCELIUM v2.3).
+        
+        Returns tokens with their phase (Gas/Solid) based on document frequency.
+        Gas tokens (df > 30% of windows) are stopwords/noise.
+        Solid tokens are discriminative and can be evidence for INHIB/GATE.
+        
+        Query params:
+            doc: document name/path
+        
+        Returns:
+            tokens: list of {word, line, phase, df, is_anchor}
+            stats: {n_windows, n_tokens, gas_count, solid_count}
+        """
+        overlay = UIHandler.overlay
+        
+        params = urllib.parse.parse_qs(query_string or "")
+        doc = (params.get('doc', [''])[0] or '').strip()
+        
+        if not doc:
+            self.send_json({'error': 'Missing doc parameter'}, 400)
+            return
+        
+        if not overlay:
+            self.send_json({'error': 'No overlay loaded'}, 400)
+            return
+        
+        doc_path, candidates = self._resolve_doc_path(doc)
+        if not doc_path:
+            self.send_json({'error': f'Document not found: {doc}'}, 404)
+            return
+        
+        try:
+            from invariant_sdk.tokenize import tokenize_with_lines
+            from invariant_sdk.halo import hash8_hex
+            from invariant_sdk.operators import build_window_stats, GAS_DF_THRESHOLD
+            from collections import Counter
+            
+            text = doc_path.read_text(encoding='utf-8')
+            tokens = tokenize_with_lines(text)
+            
+            # Build stats for this document's edges only
+            doc_edges = {}
+            for src, edges in overlay.edges.items():
+                doc_edges[src] = [e for e in edges if e.doc == doc or (e.doc and e.doc.endswith(doc))]
+                if not doc_edges[src]:
+                    del doc_edges[src]
+            
+            # Calculate df from token occurrences
+            word_counts = Counter(w for w, _ln in tokens)
+            word_lines = {}
+            for w, ln in tokens:
+                if w not in word_lines:
+                    word_lines[w] = []
+                word_lines[w].append(ln)
+            
+            # Estimate windows (lines / 5)
+            n_lines = len(set(ln for w, ln in tokens))
+            n_windows = max(1, n_lines // 3)
+            
+            gas_threshold = int(n_windows * GAS_DF_THRESHOLD)
+            
+            # Classify tokens
+            result_tokens = []
+            gas_count = 0
+            solid_count = 0
+            
+            for word in word_counts:
+                count = word_counts[word]
+                h8 = hash8_hex(f"Ġ{word}")
+                
+                # df approximation: count / avg_occurrences_per_window
+                df = count
+                is_gas = df > gas_threshold
+                
+                if is_gas:
+                    gas_count += 1
+                else:
+                    solid_count += 1
+                
+                # Check if word is indexed anchor (has edges)
+                is_anchor = h8 in overlay.edges or any(
+                    h8 == e.tgt for edges in overlay.edges.values() for e in edges
+                )
+                
+                result_tokens.append({
+                    'word': word,
+                    'lines': word_lines[word][:10],  # Limit to first 10 occurrences
+                    'phase': 'gas' if is_gas else 'solid',
+                    'df': df,
+                    'is_anchor': is_anchor,
+                    'hash8': h8,
+                })
+            
+            # Sort: anchors first, then solid, then gas
+            result_tokens.sort(key=lambda t: (
+                not t['is_anchor'],
+                t['phase'] == 'gas',
+                -t['df']
+            ))
+            
+            self.send_json({
+                'doc': doc,
+                'doc_path': str(doc_path),
+                'tokens': result_tokens[:200],  # Limit response size
+                'stats': {
+                    'n_windows': n_windows,
+                    'n_tokens': len(word_counts),
+                    'gas_count': gas_count,
+                    'solid_count': solid_count,
+                    'gas_threshold': gas_threshold,
+                    'gas_df_fraction': GAS_DF_THRESHOLD,
+                }
+            })
+        except Exception as e:
+            self.send_json({'error': str(e)}, 500)
