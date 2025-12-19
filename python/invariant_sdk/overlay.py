@@ -160,6 +160,9 @@ class OverlayGraph:
     # Private cache for provenance_map (cleared on mutations)
     _provenance_cache: Optional[Dict[str, str]] = field(default=None, repr=False)
     
+    # Format version for compatibility (v2.3 = witness field added)
+    format_version: str = field(default="2.3")
+    
     @property
     def provenance_map(self) -> Dict[str, str]:
         """

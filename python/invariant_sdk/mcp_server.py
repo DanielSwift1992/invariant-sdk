@@ -375,6 +375,7 @@ def semantic_map(file_path: str) -> str:
                     "tgt": tgt_label,
                     "line": edge.line,
                     "ring": edge.ring,
+                    "witness": edge.witness,  # Structural evidence bitmask
                 })
                 nodes_in_doc.add(src_label)
                 nodes_in_doc.add(tgt_label)
@@ -423,7 +424,7 @@ def semantic_map(file_path: str) -> str:
 
 
 @mcp.tool()
-def prove_path(source: str, target: str, max_hops: int = 5) -> str:
+def prove_path(source: str, target: str, max_hops: int = 5, mode: str = "physics") -> str:
     """
     Verify a connection exists before claiming it.
     
@@ -446,6 +447,8 @@ def prove_path(source: str, target: str, max_hops: int = 5) -> str:
         target: Second concept to check connection to
         max_hops: Search depth. Most real connections are within 3 hops.
                   Use higher values only for exploring distant connections.
+        mode: "physics" (default) = path exists
+              "typed" = path exists AND all edges pass infer_SEQ
     """
     _ensure_initialized()
     
@@ -455,21 +458,34 @@ def prove_path(source: str, target: str, max_hops: int = 5) -> str:
     src_hash = hash8_hex(f"Ġ{source.lower()}")
     tgt_hash = hash8_hex(f"Ġ{target.lower()}")
     
-    # BFS for path
+    # BFS for path (track edges for typed mode)
     visited = {src_hash}
-    queue = [(src_hash, [source])]
+    queue = [(src_hash, [source], [])]  # (hash, path, edges_in_path)
     
     for _ in range(max_hops):
         if not queue:
             break
         
         next_queue = []
-        for current, path in queue:
+        for current, path, edges_in_path in queue:
             # Check overlay edges
             for edge in _overlay.edges.get(current, []):
                 if edge.tgt == tgt_hash:
                     # Found!
                     final_path = path + [_overlay.get_label(edge.tgt) or target]
+                    all_edges = edges_in_path + [edge]
+                    
+                    # Typed mode: verify all edges pass infer_SEQ
+                    typed_verified = True
+                    if mode == "typed":
+                        from invariant_sdk.operators import infer_SEQ, InferResult
+                        for e in all_edges:
+                            # dt_observed=1 for ADJACENT edges
+                            result = infer_SEQ(e, dt_observed=1)
+                            if result != InferResult.TRUE:
+                                typed_verified = False
+                                break
+                    
                     return json.dumps({
                         "exists": True,
                         "ring": edge.ring,
@@ -477,12 +493,14 @@ def prove_path(source: str, target: str, max_hops: int = 5) -> str:
                         "doc": edge.doc,
                         "line": edge.line,
                         "provenance": f"{edge.doc}:{edge.line}" if edge.doc and edge.line else None,
+                        "mode": mode,
+                        "typed_verified": typed_verified if mode == "typed" else None,
                     }, indent=2)
                 
                 if edge.tgt not in visited:
                     visited.add(edge.tgt)
                     label = _overlay.get_label(edge.tgt) or edge.tgt[:8]
-                    next_queue.append((edge.tgt, path + [label]))
+                    next_queue.append((edge.tgt, path + [label], edges_in_path + [edge]))
             
             # Check halo edges (if physics available)
             if _physics:
@@ -492,6 +510,7 @@ def prove_path(source: str, target: str, max_hops: int = 5) -> str:
                         n_hash = n.get("hash8")
                         if n_hash == tgt_hash:
                             final_path = path + [_overlay.get_label(n_hash) or target]
+                            # λ paths have no σ-witness — can't be typed verified
                             return json.dumps({
                                 "exists": True,
                                 "ring": "lambda",  # From halo = ghost edge
@@ -499,12 +518,15 @@ def prove_path(source: str, target: str, max_hops: int = 5) -> str:
                                 "doc": None,
                                 "line": None,
                                 "provenance": None,
+                                "mode": mode,
+                                "typed_verified": False if mode == "typed" else None,  # λ can't pass
                             }, indent=2)
                         
                         if n_hash and n_hash not in visited:
                             visited.add(n_hash)
                             label = _overlay.get_label(n_hash) or n_hash[:8]
-                            next_queue.append((n_hash, path + [label]))
+                            # λ edges have no edge object, so pass empty list
+                            next_queue.append((n_hash, path + [label], edges_in_path))
                 except Exception:
                     pass
         

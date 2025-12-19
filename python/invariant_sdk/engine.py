@@ -6,6 +6,13 @@ implementation for:
   - file discovery from issue text (locate)
   - file structure outline (map)
 
+ARCHITECTURE CONTRACT:
+  - locate_files() uses PURE PHYSICS: co-occurrence, mass, IDF
+  - Witness/operators (infer_DEF/SEQ) are NOT used in ranking
+  - This ensures reproducible results independent of operator changes
+  
+  Operators are a SEPARATE LAYER for typed reasoning (prove_path mode="typed")
+
 This module is intentionally stdlib-only and deterministic.
 """
 

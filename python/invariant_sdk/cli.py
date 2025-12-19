@@ -20,7 +20,7 @@ from typing import List, Set
 # Import SDK components
 try:
     from .halo import hash8_hex
-    from .overlay import OverlayGraph, find_overlays
+    from .overlay import OverlayGraph, OverlayEdge, find_overlays
     from .physics import HaloPhysics
     from .tokenize import tokenize_simple as _tokenize_simple
     from .tokenize import tokenize_with_positions as _tokenize_with_positions
@@ -349,6 +349,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
             tgt_hash = word_to_hash.get(tgt_word) or hash8_hex(f"Ġ{tgt_word}")
 
             # ALL document edges are σ (provable facts with doc:line provenance)
+            # WITNESS: ADJACENT (consecutive tokens in text)
             ctx_hash = compute_ctx_hash(tokens_with_pos, j + 1, k=2)
             overlay.add_edge(
                 src_hash,
@@ -359,6 +360,7 @@ def cmd_ingest(args: argparse.Namespace) -> int:
                 phase=tgt_phase,
                 line=tgt_line,
                 ctx_hash=ctx_hash,
+                witness=OverlayEdge.ADJACENT,  # Consecutive tokens = structurally adjacent
             )
             overlay.define_label(src_hash, src_word)
             overlay.define_label(tgt_hash, tgt_word)
