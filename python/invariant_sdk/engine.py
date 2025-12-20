@@ -6,8 +6,10 @@ implementation for:
   - file discovery from issue text (locate)
   - file structure outline (map)
 
-ARCHITECTURE CONTRACT:
-  - locate_files() uses PURE PHYSICS: co-occurrence, mass, IDF
+ARCHITECTURE CONTRACT (RUNTIME_CONTRACT v1.7):
+  - locate_files() uses FULL HAMILTONIAN: E = Ψ² (presence + interference)
+  - Dyadic multi-scale energy (scales 2⁰, 2¹, ..., 2⁷)
+  - INVARIANT: df == 0 ⟹ α = 0 (λ-lens cannot create σ-truth)
   - Witness/operators (infer_DEF/SEQ) are NOT used in ranking
   - This ensures reproducible results independent of operator changes
   
@@ -26,6 +28,7 @@ from typing import TYPE_CHECKING, Callable, Dict, Iterable, List, Optional, Sequ
 from .halo import hash8_hex
 from .overlay import OverlayEdge, OverlayGraph
 from .tokenize import dedupe_preserve_order, tokenize_simple
+from .quantum import compute_dyadic_energy, compute_amplitude, normalize_by_entropy, compute_ranking_tuple, occurrences_to_sigma_events, compute_peak_score, beta_from_query
 
 if TYPE_CHECKING:
     from .physics import HaloPhysics
@@ -454,21 +457,46 @@ def locate_files(
         h8 = _resolve_query_hash(w, overlay=overlay, index=idx)
         direct_hashes.add(h8)
 
-    file_scores: Dict[str, Dict] = {}  # doc -> {hashes:set, line_hashes:dict, direct_line_hashes:dict}
+    file_scores: Dict[str, Dict] = {}  # doc -> {hashes:set, line_hashes:dict, direct_line_hashes:dict, event_hashes:dict}
 
-    def _touch(doc: str, h8: str, line: Optional[int]) -> None:
+    def _touch(doc: str, h8: str, line: Optional[int], ctx_hash: Optional[str] = None) -> None:
+        """
+        Register a hash occurrence in a document.
+        
+        v1.8.2: Uses (ctx_hash OR line) as σ-event identity.
+        - ctx_hash: true σ-identity (stable under edits)
+        - line: legacy proxy (for overlays without ctx_hash)
+        """
         if not doc:
             return
         if doc_filter and doc != doc_filter:
             return
         entry = file_scores.get(doc)
         if entry is None:
-            entry = {"hashes": set(), "line_hashes": {}, "direct_line_hashes": {}}
+            entry = {
+                "hashes": set(), 
+                "line_hashes": {},  # line -> {hashes} (legacy, for epicenter)
+                "direct_line_hashes": {},
+                "event_hashes": {},  # v1.8.2: event_key -> {hashes}
+                "event_lines": {},   # v1.8.2: event_key -> line (for ordering)
+            }
             file_scores[doc] = entry
         entry["hashes"].add(h8)
+        
+        # v1.8.2: Dual grouping - prefer ctx_hash, fallback to line
+        event_key = ctx_hash if ctx_hash else (f"line:{line}" if line else None)
+        
+        if event_key:
+            if event_key not in entry["event_hashes"]:
+                entry["event_hashes"][event_key] = set()
+            entry["event_hashes"][event_key].add(h8)
+            # Track line for ordering (first occurrence wins)
+            if event_key not in entry["event_lines"]:
+                entry["event_lines"][event_key] = line or 0
+        
+        # Legacy line_hashes (for epicenter/preview)
         if line:
             ln = int(line)
-            # Track all hashes for scoring
             if ln not in entry["line_hashes"]:
                 entry["line_hashes"][ln] = set()
             entry["line_hashes"][ln].add(h8)
@@ -483,23 +511,25 @@ def locate_files(
         for edge in overlay.edges.get(h8, []):
             if not edge.doc:
                 continue
-            _touch(edge.doc, h8, edge.line)
+            _touch(edge.doc, h8, edge.line, edge.ctx_hash)
 
     # Incoming (term is tgt)
     for h8 in expanded.keys():
         for _src, edge in idx.incoming.get(h8, []):
             if not edge.doc:
                 continue
-            _touch(edge.doc, h8, edge.line)
+            _touch(edge.doc, h8, edge.line, edge.ctx_hash)
 
-    # === SCORING LAW (INVARIANTS V.2) ===
-    # Score = Σ Mass × IDF × Coupling
-    # Mass = global importance (α)
-    # IDF = local discriminativeness (σ) = log(N_docs / df)
-    # Coupling = lens conductivity (α weight), 1.0 for direct matches
+    # === FULL HAMILTONIAN SCORING (RUNTIME_CONTRACT v1.7) ===
+    # E = Ψ² = Σα² + 2Σαᵢαⱼ (presence + interference)
+    # Dyadic multi-scale energy computation
     import math
 
     n_docs = len(idx.doc_stats) or 1
+    n_vocab = 150000  # Default if physics unavailable
+    if physics is not None:
+        n_vocab = int((physics.meta or {}).get("n_labels", 150000))
+    epsilon = 1.0 / math.log(n_vocab) if n_vocab > 1 else 0.1
 
     ranked: List[Tuple[str, Dict]] = []
     for doc, info in file_scores.items():
@@ -507,40 +537,47 @@ def locate_files(
         if not matched_hashes:
             continue
 
+        # 1) Compute amplitudes for each matched hash
+        amplitudes: Dict[str, float] = {}
         word_contributions: List[Dict] = []
-        total_score = 0.0
 
         for h8 in matched_hashes:
             term = expanded.get(h8) or {}
 
             df = len(idx.hash_to_docs.get(h8, set()))
-            idf = math.log(n_docs / df) if df and df < n_docs else 0.0
+            
+            # v1.8.3: OOV mass = self-information from σ-corpus
+            # If Halo provides mass → use it
+            # Else: mass = -log(df/n_docs) / log(n_docs) ∈ [0,1]
+            halo_mass = term.get("mass")
+            if halo_mass is not None and float(halo_mass) > 0:
+                mass = float(halo_mass)
+            elif df > 0 and n_docs > 1:
+                # Self-information: rare = high mass, common = low mass
+                mass = min(1.0, max(0.1, -math.log(df / n_docs) / math.log(n_docs)))
+            else:
+                mass = 1.0  # Fallback for df=0 (filtered out anyway)
 
-            mass = float(term.get("mass") or 1.0)
-            
-            # Invariant IV: Will > Observation
-            # Hierarchy: σ (local) > α-Crystal (known) > α-Embeddings (felt)
-            # ε = 1/ln(N) where N = vocabulary size (derived, not magic)
-            n_vocab = 150000  # Default if physics unavailable
-            if physics is not None:
-                n_vocab = int((physics.meta or {}).get("n_labels", 150000))
-            epsilon = 1.0 / math.log(n_vocab) if n_vocab > 1 else 0.1
-            
             source_type = str(term.get("source_type") or "crystal")
             is_direct = bool(term.get("is_direct"))
             weight = abs(float(term.get("weight") or 0.0))
-            
-            if is_direct:
-                coupling = 1.0  # Direct query words: full weight
-            elif source_type == "local":
-                coupling = 1.0  # Local σ-facts: full weight (documentary evidence)
-            elif source_type == "embedding":
-                coupling = weight * epsilon  # Global embeddings: dampened by ε
-            else:
-                coupling = weight  # Global Crystal expansion: use weight directly
 
-            contribution = mass * idf * coupling
-            total_score += contribution
+            if is_direct:
+                coupling = 1.0
+            elif source_type == "local":
+                coupling = 1.0
+            elif source_type == "embedding":
+                coupling = weight * epsilon
+            else:
+                coupling = weight
+
+            # INVARIANT: df == 0 ⟹ α = 0 (λ-lens cannot create σ-truth)
+            alpha = compute_amplitude(mass=mass, df=df, n_docs=n_docs, coupling=coupling)
+            amplitudes[h8] = alpha
+
+            # Keep contribution for UI/debugging
+            contribution = alpha  # Individual amplitude (not energy)
+            idf = math.log(n_docs / df) if df and df < n_docs else 0.0
 
             word_contributions.append(
                 {
@@ -549,38 +586,70 @@ def locate_files(
                     "source_word": str(term.get("source_word") or ""),
                     "is_direct": is_direct,
                     "source_type": source_type,
-                    "phase": str(term.get("phase") or "solid"),  # Supercharged: expose gas/solid
+                    "phase": str(term.get("phase") or "solid"),
                     "mass": mass,
                     "df": df,
                     "idf": idf,
                     "weight": coupling,
+                    "alpha": alpha,
                     "contribution": contribution,
                 }
             )
 
-        for wc in word_contributions:
-            wc["percent"] = round(wc["contribution"] / total_score * 100, 1) if total_score > 0 else 0.0
+        # 2) Build σ-events directly from event_hashes (v1.9.1: true ctx_hash identity)
+        # 
+        # CRITICAL: We build sigma_events directly from event_hashes,
+        # NOT through occurrences_to_sigma_events which re-groups by line.
+        # This preserves ctx_hash identity: each event_key = one σ-event.
+        event_hashes = info.get("event_hashes") or {}
+        event_lines = info.get("event_lines") or {}
+        
+        # Sort events by their associated line (for order stability)
+        sorted_events = sorted(event_hashes.items(), key=lambda x: event_lines.get(x[0], 0))
+        
+        # Build sigma_events: each event_key → one σ-event with {h8: alpha}
+        sigma_events: List[Dict[str, float]] = []
+        for event_key, hashes in sorted_events:
+            event_dict: Dict[str, float] = {}
+            for h8 in hashes:
+                if h8 in amplitudes:
+                    event_dict[h8] = amplitudes[h8]
+            if event_dict:
+                sigma_events.append(event_dict)
 
-        word_contributions.sort(key=lambda x: (-float(x.get("contribution") or 0.0), str(x.get("word") or "").lower()))
+        # 3) Compute Scores: Peak (primary) + Sum (secondary) (v1.9)
+        query_hash_set = set(amplitudes.keys())
+        if sigma_events:
+            
+            # v1.9.4 Invariant IX: Peak Energy Wins (needle detection)
+            # Pass query amplitudes for query-level binding
+            peak_score = compute_peak_score(sigma_events, query_hash_set, 
+                                            query_amplitudes=amplitudes)
+            
+            # Sum energy for secondary ranking (context/coverage)
+            # v1.9.2: Normalize by len(sigma_events), not anchor count
+            energy, coherence, min_scale = compute_ranking_tuple(sigma_events, query_hash_set)
+            sum_score = normalize_by_entropy(energy, len(sigma_events))
+            total_coherence = normalize_by_entropy(coherence, len(sigma_events))
+            
+            # Primary = peak (needles win), Secondary = sum (context)
+            total_score = peak_score
+        else:
+            # Fallback: sum of alphas if no line info (legacy overlays)
+            total_score = sum(amplitudes.values())
+            sum_score = total_score
+            total_coherence = 0.0
+            min_scale = 8
+
+        # 4) Compute percentages for UI
+        alpha_sum = sum(wc["alpha"] for wc in word_contributions) or 1.0
+        for wc in word_contributions:
+            wc["percent"] = round(wc["alpha"] / alpha_sum * 100, 1) if alpha_sum > 0 else 0.0
+
+        word_contributions.sort(key=lambda x: (-float(x.get("alpha") or 0.0), str(x.get("word") or "").lower()))
         sorted_matches = [wc["word"] for wc in word_contributions]
 
-        # V.3 Observation Law: Only SIGNAL contributes to ranking
-        # Noise floor = 1/N (uniform distribution baseline)
-        # Words below threshold are noise - they don't add to score
-        n_matched = len(word_contributions) or 1
-        threshold_pct = 100.0 / n_matched  # 1/N as percentage
-        
-        signal_score = sum(
-            wc["contribution"] 
-            for wc in word_contributions 
-            if wc.get("percent", 0.0) > threshold_pct
-        )
-        # Fallback: if all words are noise, use max contribution (there's always at least one signal)
-        if signal_score == 0 and word_contributions:
-            signal_score = word_contributions[0]["contribution"]
-
-        # Semantic Bridges: Show expansion paths (V.3 Observation Law - make inference visible)
-        # Only include indirect matches where found_word ≠ source_word
+        # Semantic Bridges: Show expansion paths
         semantic_bridges = []
         for wc in word_contributions:
             if not wc.get("is_direct") and wc.get("source_word"):
@@ -597,15 +666,26 @@ def locate_files(
                 {
                     "file": doc,
                     "n_matches": len(matched_hashes),
+                    "n_events": len(sigma_events),
                     "matching_words": sorted_matches,
                     "word_contributions": word_contributions,
                     "semantic_bridges": semantic_bridges,
-                    "score": round(signal_score, 6),  # V.3: Only signal, not noise
+                    "score": round(total_score, 6),  # v1.9: peak score
+                    "sum_score": round(sum_score, 6),  # v1.9: sum for secondary
+                    "coherence": round(total_coherence, 6),
+                    "min_scale": min_scale,
                 },
             )
         )
 
-    ranked.sort(key=lambda x: (-float(x[1].get("score") or 0.0), -int(x[1].get("n_matches") or 0), x[0].lower()))
+    # v1.9: Stable tie-breaking by (peak desc, sum desc, coherence desc, min_scale asc, doc_id)
+    ranked.sort(key=lambda x: (
+        -float(x[1].get("score") or 0.0),
+        -float(x[1].get("sum_score") or 0.0),
+        -float(x[1].get("coherence") or 0.0),
+        int(x[1].get("min_scale") or 8),
+        x[0].lower()
+    ))
 
     # Apply max_results (0 = "all").
     results: List[Dict] = []

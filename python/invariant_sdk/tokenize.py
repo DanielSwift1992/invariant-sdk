@@ -17,19 +17,88 @@ import re
 from typing import Iterable, List, Tuple
 
 
-# "Identifier-ish" surface tokens: letters/digits/underscore, length >= 3.
-# We normalize (lowercase + strip edge underscores) and require ≥1 letter.
-_TOKEN_RE = re.compile(r"[A-Za-z0-9_]{3,}")
+# "Identifier-ish" surface tokens: letters/digits/underscore, length >= 2.
+# v1.8: Also captures numeric IDs and dates.
+_TOKEN_RE = re.compile(r"[A-Za-z0-9_./\-]{2,}")
+
+# Date-like pattern: 2-3 groups of digits separated by / - or .
+_DATE_PATTERN = re.compile(r"^(\d{1,4})[\-/.](\d{1,2})[\-/.](\d{1,4})$")
+
+
+def _normalize_date_like(token: str) -> str | None:
+    """
+    Normalize date-like tokens to consistent YYYYMMDD format.
+    
+    Handles:
+      - MM/DD/YYYY → YYYYMMDD
+      - YYYY-MM-DD → YYYYMMDD
+      - M/D/YYYY → YYYYMMDD (with padding)
+    
+    Returns None if not a date-like token.
+    """
+    m = _DATE_PATTERN.match(token)
+    if not m:
+        return None
+    
+    g1, g2, g3 = m.group(1), m.group(2), m.group(3)
+    
+    # Determine format: YYYY-MM-DD vs MM/DD/YYYY
+    if len(g1) == 4:
+        # YYYY-MM-DD format
+        year, month, day = g1, g2, g3
+    elif len(g3) == 4:
+        # MM/DD/YYYY or DD/MM/YYYY format
+        # Assume MM/DD/YYYY (US format common in Enron)
+        month, day, year = g1, g2, g3
+    else:
+        # Ambiguous, just join with padding
+        return f"{g1.zfill(2)}{g2.zfill(2)}{g3.zfill(2)}"
+    
+    # Canonical: YYYYMMDD
+    return f"{year}{month.zfill(2)}{day.zfill(2)}"
 
 
 def _normalize(raw: str) -> str | None:
-    """Normalize token: lowercase only. Preserve underscores (important for code!)"""
+    """
+    Normalize token for indexing.
+    
+    v1.8.1: Supports three token types (σ-presence wins for ALL):
+      - DATE_LIKE: recognized dates → YYYYMMDD (e.g., "1/5/2001" → "20010105")
+      - PURE_NUM: digits only, length >= 2 (e.g., "258505")
+      - ALNUM_ID: mixed letters+digits, length >= 3 (e.g., "FERC123")
+      - WORD: letters only, length >= 3 (e.g., "deal")
+    """
     token = raw.lower()
-    if len(token) < 3:
+    
+    # Strip common separators from edges
+    token = token.strip(".-/_")
+    
+    if not token:
         return None
-    if not any("a" <= c <= "z" for c in token):
-        return None
-    return token
+    
+    # Check for date-like pattern FIRST (before stripping separators)
+    date_result = _normalize_date_like(token)
+    if date_result:
+        return date_result
+    
+    has_alpha = any("a" <= c <= "z" for c in token)
+    has_digit = any(c.isdigit() for c in token)
+    
+    # PURE_NUM: only digits (after cleaning separators), length >= 2
+    digits_only = "".join(c for c in token if c.isdigit())
+    if not has_alpha and has_digit and len(digits_only) >= 2:
+        return digits_only  # Canonical form: just digits
+    
+    # ALNUM_ID: both letters and digits, length >= 3
+    alnum_only = "".join(c for c in token if c.isalnum() or c == "_")
+    if has_alpha and has_digit and len(alnum_only) >= 3:
+        return alnum_only
+    
+    # WORD: letters only (may have underscore), length >= 3
+    if has_alpha and len(token) >= 3:
+        return token
+    
+    return None
 
 
 def normalize_for_hash(text: str) -> str:

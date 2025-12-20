@@ -1172,39 +1172,39 @@ def ingest(file_path: str) -> str:
             mass = 1.0 / math.log(2 + max(0, degree_total)) if degree_total > 0 else 0
             candidates.append((word, h8, mass, degree_total, True))
         
-        # === LAW OF CONDENSATION (INVARIANTS V.1) ===
-        # Phase = Solid iff Mass_α > μ_mass OR TF_local > TF_crit
-        # This respects Hierarchy: local σ-observation can override α-classification
+        # === INVARIANT VII: σ-PRESENCE WINS (RUNTIME_CONTRACT v1.7) ===
+        # σ-index MUST contain ALL unique tokens observed in document.
+        # Filtering happens via α-coefficient at query time, not at ingest.
+        #
+        # Only exclusion: Hub-words (degree > √N_vocab) which are noise.
+        # This ensures names like "Eric", "Bass", "Arnold" are ALWAYS indexed.
         
-        # 1. Global Mass criterion (α-classification)
-        solid_by_mass = {(w, h8) for (w, h8, m, _deg, _exists) in candidates if m > mean_mass}
-
-        # 2. Local TF criterion (σ-observation / Condensation)
-        # Define critical pressure as the mean per-type frequency in this document.
-        # (No external constants; derived from the local distribution itself.)
-        from collections import Counter
-
-        word_counts = Counter(w for w, _ in tokens)
-        tf_mean = (sum(word_counts.values()) / len(word_counts)) if word_counts else 0.0
-
-        # Exclude LINK/hub words from condensing (Invariant: LINK if degree > √N).
-        n_labels = int((_physics.meta or {}).get("n_labels") or 1)
-        link_degree = math.sqrt(max(1, n_labels))
-
-        cand_by_word = {w: (h8, deg, exists) for (w, h8, _m, deg, exists) in candidates}
-        solid_by_tf = {
-            (w, cand_by_word[w][0])
-            for w, count in word_counts.items()
-            if count > tf_mean
-            and w in cand_by_word
-            and (
-                not cand_by_word[w][2]  # unknown words can condense
-                or float(cand_by_word[w][1]) <= link_degree
+        # Hub threshold: √N_vocab (derived, not magic)
+        n_labels = int((_physics.meta or {}).get("n_labels") or 150000)
+        hub_threshold = math.sqrt(max(1, n_labels))  # ≈ 387 for 150k vocab
+        
+        # Index ALL tokens, except Hubs
+        solid = {
+            (w, h8)
+            for (w, h8, mass, degree, exists) in candidates
+            if (
+                not exists  # OOV → always index (local discovery)
+                or degree <= hub_threshold  # Not a hub → index
             )
         }
         
-        # 3. Combined: anchor if EITHER criterion is met
-        solid = solid_by_mass | solid_by_tf
+        # Fallback only if filter killed everything (shouldn't happen)
+        if len(solid) < 2:
+            # Take all non-hub words unconditionally
+            solid = {
+                (w, h8) 
+                for (w, h8, m, deg, exists) in candidates 
+                if not exists or deg <= hub_threshold
+            }
+            # Still nothing? Take top by mass
+            if len(solid) < 2:
+                top = sorted(candidates, key=lambda x: x[2], reverse=True)[:64]
+                solid = {(w, h8) for (w, h8, _m, _deg, _exists) in top}
         
         if len(solid) >= 2:
             anchors = list(solid)

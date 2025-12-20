@@ -354,6 +354,13 @@ class OverlayGraph:
                     entry["line"] = edge.line
                 if edge.ctx_hash:
                     entry["ctx_hash"] = edge.ctx_hash
+                # Persist physical state fields (v1.7.2)
+                if edge.witness:
+                    entry["witness"] = edge.witness
+                if edge.anchor_state:
+                    entry["anchor_state"] = edge.anchor_state
+                if edge.live_state:
+                    entry["live_state"] = edge.live_state
                 lines.append(json.dumps(entry))
         
         # Suppressions
@@ -420,6 +427,8 @@ class OverlayGraph:
         )
         # O(1) append - conflict detection is now lazy (check on demand)
         self.edges[src].append(new_edge)
+        # Add reverse index for bidirectional lookup (for incoming edges)
+        self.reverse_edges[tgt].append((src, new_edge))
         # O(1) doc index update for fast deletion
         if doc:
             self.doc_to_nodes[doc].add(src)
