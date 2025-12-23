@@ -14,7 +14,11 @@ would produce zero matches with patterns like `\\b[a-zA-Z]{3,}\\b`.
 from __future__ import annotations
 
 import re
-from typing import Iterable, List, Tuple
+from typing import Iterable, List, Literal, Tuple
+
+# DEFINITION: Two tokenizer modes (measurement instrument choice)
+# This is NOT multiple "profiles" — it's two classes of measurement.
+TokenizerMode = Literal["atomic", "identifier"]
 
 
 # "Identifier-ish" surface tokens: letters/digits/underscore, length >= 2.
@@ -158,10 +162,30 @@ def normalize_for_hash(text: str) -> str:
     return ' '.join(text.split())
 
 
-def tokenize_simple(text: str) -> List[str]:
-    """Extract normalized tokens from arbitrary text (may include duplicates)."""
+def tokenize_simple(text: str, mode: TokenizerMode = "atomic") -> List[str]:
+    """
+    Extract normalized tokens from arbitrary text (may include duplicates).
+    
+    Args:
+        text: Input text to tokenize
+        mode: Tokenizer mode (DEFINITION, not POLICY)
+            - "atomic": Split by [_./-] — for email, logs, prose
+            - "identifier": Preserve _ in tokens — for code repositories
+    
+    Note: ingest and query MUST use the same mode to avoid split-brain.
+    """
     out: List[str] = []
-    for m in _TOKEN_RE.finditer(text):
+    
+    # Mode-specific regex (DEFINITION, not POLICY)
+    if mode == "identifier":
+        # Preserve underscores as part of identifiers (for code)
+        pattern = re.compile(r"[A-Za-z0-9_]{2,}")
+    else:
+        # Atomic mode: split by separators including underscore (for email/logs)
+        # This splits snake_case into parts: get_data → [get, data]
+        pattern = re.compile(r"[A-Za-z0-9]{2,}")
+    
+    for m in pattern.finditer(text):
         token = _normalize(m.group(0))
         if token:
             out.append(token)
