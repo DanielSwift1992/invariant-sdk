@@ -148,6 +148,122 @@ def test_tokenize_hyphenated_id():
     )
 
 
+# =============================================================================
+# v1.9.5 GATE TESTS: Canonical Month Equivalence (CAUSAL_TEXT_SPEC)
+# These are INSTRUMENT DEFINITIONS, not physics LAWs.
+# =============================================================================
+
+def test_month_canonical_december():
+    """GATE: 'December' normalizes to @month12 (full name is unambiguous)."""
+    assert _normalize("December") == "@month12"
+    assert _normalize("december") == "@month12"
+    # Note: 'dec' is AMBIGUOUS (decrement/decoder) - see test_collision_dec_not_month
+
+
+def test_month_canonical_unambiguous():
+    """GATE: Unambiguous months canonicalize standalone."""
+    unambiguous = [
+        ("January", "@month01"), ("jan", "@month01"),
+        ("February", "@month02"), ("feb", "@month02"),
+        # march EXCLUDED - ambiguous (verb/noun)
+        ("April", "@month04"), ("apr", "@month04"),
+        # may EXCLUDED - ambiguous (modal verb)
+        ("June", "@month06"), ("jun", "@month06"),
+        ("July", "@month07"), ("jul", "@month07"),
+        ("August", "@month08"), ("aug", "@month08"),
+        ("September", "@month09"), ("sep", "@month09"), ("sept", "@month09"),
+        ("October", "@month10"), ("oct", "@month10"),
+        ("November", "@month11"), ("nov", "@month11"),
+        ("December", "@month12"),  # "dec" EXCLUDED - decrement/decoder/decimal
+    ]
+    for input_val, expected in unambiguous:
+        result = _normalize(input_val)
+        assert result == expected, f"_normalize('{input_val}') = {result}, expected {expected}"
+
+
+# =============================================================================
+# COLLISION GATE TESTS (MUST-NOT-FIRE)
+# These verify ambiguous words are NOT incorrectly canonicalized.
+# =============================================================================
+
+def test_collision_may_verb_not_month():
+    """COLLISION GATE: 'may' as verb does NOT become @month05."""
+    # "may" is a modal verb - should stay as word, not month
+    result = _normalize("may")
+    assert result != "@month05", f"'may' should NOT be @month05, got {result}"
+    assert result == "may", f"'may' should stay as word 'may', got {result}"
+
+
+def test_collision_march_verb_not_month():
+    """COLLISION GATE: 'march' as verb/noun does NOT become @month03."""
+    # "march" can be verb (march forward) or event (March on Washington)
+    result = _normalize("march")
+    assert result != "@month03", f"'march' should NOT be @month03, got {result}"
+    assert result == "march", f"'march' should stay as word 'march', got {result}"
+
+
+def test_collision_may_in_sentence():
+    """COLLISION GATE: 'may I ask' does NOT produce @month05."""
+    tokens = tokenize_simple("may I ask you something")
+    assert "@month05" not in tokens, f"'may I ask' should NOT contain @month05: {tokens}"
+    assert "may" in tokens, f"'may' should be preserved as word: {tokens}"
+
+
+def test_collision_march_in_sentence():
+    """COLLISION GATE: 'soldiers march forward' does NOT produce @month03."""
+    tokens = tokenize_simple("soldiers march forward")
+    assert "@month03" not in tokens, f"'march forward' should NOT contain @month03: {tokens}"
+    assert "march" in tokens, f"'march' should be preserved as word: {tokens}"
+
+
+def test_month_canonical_in_tokenize():
+    """GATE: tokenize_simple uses canonical month forms (unambiguous only)."""
+    tokens = tokenize_simple("meeting in December 2001")
+    assert "@month12" in tokens, f"Expected @month12 in {tokens}"
+    assert "2001" in tokens
+
+
+def test_month_canonical_preserves_hash():
+    """GATE: Same month names → same hash8 address."""
+    from invariant_sdk.halo import hash8_hex
+    
+    h1 = hash8_hex("Ġ@month12")
+    h2 = hash8_hex("Ġ@month12")
+    
+    # "December" produces @month12 (unambiguous)
+    assert h1 == h2, "Same canonical form must produce same hash"
+    
+    # tokenize uses canonical form for unambiguous
+    tokens_dec = tokenize_simple("in December")
+    assert "@month12" in tokens_dec
+
+
+# =============================================================================
+# COLLISION GATE TESTS for 'dec' (MUST-NOT-FIRE)
+# 'dec' can mean decrement/decoder/decimal in code contexts
+# =============================================================================
+
+def test_collision_dec_not_month():
+    """COLLISION GATE: 'dec' alone does NOT become @month12."""
+    # 'dec' is ambiguous: decrement, decoder, decimal, December
+    result = _normalize("dec")
+    assert result != "@month12", f"'dec' should NOT be @month12, got {result}"
+    assert result == "dec", f"'dec' should stay as word 'dec', got {result}"
+
+
+def test_collision_dec_in_code():
+    """COLLISION GATE: 'dec variable' does NOT produce @month12."""
+    tokens = tokenize_simple("int dec = value - 1")
+    assert "@month12" not in tokens, f"'dec' in code should NOT be @month12: {tokens}"
+    assert "dec" in tokens, f"'dec' should be preserved as word: {tokens}"
+
+
+def test_collision_decoder():
+    """COLLISION GATE: 'decoder' is not month-related."""
+    result = _normalize("decoder")
+    assert "@month12" not in result
+    assert result == "decoder"
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

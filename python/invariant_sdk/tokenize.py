@@ -24,6 +24,39 @@ _TOKEN_RE = re.compile(r"[A-Za-z0-9_./\-]{2,}")
 # Date-like pattern: 2-3 groups of digits separated by / - or .
 _DATE_PATTERN = re.compile(r"^(\d{1,4})[\-/.](\d{1,2})[\-/.](\d{1,4})$")
 
+# =============================================================================
+# DEFINITION: Canonical Equivalence Classes (CAUSAL_TEXT_SPEC)
+# These are INSTRUMENT DEFINITIONS, not physics LAWs.
+# They must be date-context gated for ambiguous tokens.
+# =============================================================================
+
+# UNAMBIGUOUS months: Safe to canonicalize as standalone tokens.
+# These words are almost exclusively month references.
+_MONTH_CANONICAL_SAFE = {
+    "january": "@month01", "jan": "@month01",
+    "february": "@month02", "feb": "@month02",
+    # "march" EXCLUDED - also a verb/noun (march forward)
+    # "mar" - too short/ambiguous
+    "april": "@month04", "apr": "@month04",
+    # "may" EXCLUDED - modal verb (may I ask)
+    "june": "@month06", "jun": "@month06",
+    "july": "@month07", "jul": "@month07",
+    "august": "@month08", "aug": "@month08",
+    "september": "@month09", "sep": "@month09", "sept": "@month09",
+    "october": "@month10", "oct": "@month10",
+    "november": "@month11", "nov": "@month11",
+    "december": "@month12",  # "dec" EXCLUDED - decrement/decoder/decimal
+}
+
+# AMBIGUOUS months: Only canonicalize in DATE CONTEXT.
+# These require adjacent year/day to be treated as months.
+_MONTH_AMBIGUOUS = {
+    "march": "@month03", "mar": "@month03",
+    "may": "@month05",
+    "dec": "@month12",  # Can be decrement/decoder/decimal in code
+}
+
+
 
 def _normalize_date_like(token: str) -> str | None:
     """
@@ -62,8 +95,9 @@ def _normalize(raw: str) -> str | None:
     """
     Normalize token for indexing.
     
-    v1.8.1: Supports three token types (σ-presence wins for ALL):
+    v1.9.5: Supports token types with canonical equivalence classes:
       - DATE_LIKE: recognized dates → YYYYMMDD (e.g., "1/5/2001" → "20010105")
+      - MONTH: month names → @month01..@month12 (e.g., "December" → "@month12")
       - PURE_NUM: digits only, length >= 2 (e.g., "258505")
       - ALNUM_ID: mixed letters+digits, length >= 3 (e.g., "FERC123")
       - WORD: letters only, length >= 3 (e.g., "deal")
@@ -80,6 +114,12 @@ def _normalize(raw: str) -> str | None:
     date_result = _normalize_date_like(token)
     if date_result:
         return date_result
+    
+    # DEFINITION: Canonical month equivalence (INSTRUMENT, not LAW)
+    # Only UNAMBIGUOUS months canonicalize standalone.
+    # Ambiguous months (may, march) require date context.
+    if token in _MONTH_CANONICAL_SAFE:
+        return _MONTH_CANONICAL_SAFE[token]
     
     has_alpha = any("a" <= c <= "z" for c in token)
     has_digit = any(c.isdigit() for c in token)

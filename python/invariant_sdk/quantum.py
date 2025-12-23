@@ -109,6 +109,7 @@ def compute_sigma_coherence(
     query_anchors: Set[str],
     max_scale: int = 8,
     query_amplitudes: Optional[Dict[str, float]] = None,
+    direct_anchors: Optional[Set[str]] = None,
 ) -> float:
     """
     Compute Interaction-Only energy I = Ψ² - Σα².
@@ -117,7 +118,12 @@ def compute_sigma_coherence(
     Use for typed/strict mode where pure structure matters.
     
     v1.9.4: query_amplitudes parameter for query-level binding.
-    If provided, threshold is constant across all docs for same query.
+    v1.9.5: direct_anchors parameter for Intent-Sovereignty (Invariant IV).
+    
+    Args:
+        direct_anchors: Set of hash8s that are direct query terms.
+                       Direct-to-Direct pairs ALWAYS bypass threshold.
+                       (Will > Observation per Hierarchy Law)
     
     Returns:
         Coherence energy (0 if no interaction, positive if anchors co-occur)
@@ -175,14 +181,23 @@ def compute_sigma_coherence(
             if len(window_anchors) < 2:
                 continue
             
-            # v1.9.3: Explicit cross-term with binding filter
-            # Only pairs with αᵢ × αⱼ >= threshold contribute
+            # v1.9.5: Intent-Sovereignty LAW (Invariant IV)
+            # Direct-to-Direct pairs ALWAYS pass (Will > Observation)
+            # Expansion pairs require pair_product >= threshold
             anchors_list = list(window_anchors.items())
             window_coherence = 0.0
             for i, (h8_i, alpha_i) in enumerate(anchors_list):
                 for h8_j, alpha_j in anchors_list[i+1:]:
                     pair_product = alpha_i * alpha_j
-                    if pair_product >= threshold:
+                    
+                    # Intent-Sovereignty: direct pairs bypass threshold
+                    is_direct_pair = (
+                        direct_anchors is not None
+                        and h8_i in direct_anchors
+                        and h8_j in direct_anchors
+                    )
+                    
+                    if is_direct_pair or pair_product >= threshold:
                         window_coherence += 2 * pair_product  # 2αᵢαⱼ
             
             scale_coherence += window_coherence
@@ -277,6 +292,7 @@ def compute_peak_score(
     query_anchors: Set[str],
     max_scale: int = 8,
     query_amplitudes: Optional[Dict[str, float]] = None,
+    direct_anchors: Optional[Set[str]] = None,
 ) -> float:
     """
     Invariant IX: Peak Energy Wins.
@@ -285,7 +301,10 @@ def compute_peak_score(
     Needles in long documents are not diluted.
     
     v1.9.4: query_amplitudes parameter for query-level binding.
+    v1.9.5: direct_anchors parameter for Intent-Sovereignty (Invariant IV).
+    
     Energy is now binding-protected: E = Σα² + filtered_2αᵢαⱼ
+    Direct-to-Direct pairs ALWAYS contribute (Will > Observation).
     
     Score_max(d,q) = max_{window} E_filtered(window, q)
     """
@@ -335,17 +354,26 @@ def compute_peak_score(
                 for h8, alpha in event.items():
                     window_anchors[h8] = max(window_anchors.get(h8, 0), alpha)
             
-            # v1.9.4: Binding-protected energy
-            # E = Σα² + Σ(filtered 2αᵢαⱼ) where αᵢαⱼ >= threshold
+            # v1.9.5: Binding-protected energy with Intent-Sovereignty
+            # E = Σα² + Σ(filtered 2αᵢαⱼ)
+            # Direct pairs ALWAYS pass (Will > Observation)
             sum_sq = sum(a ** 2 for a in window_anchors.values())
             
             # Compute filtered cross-terms
             filtered_cross = 0.0
             anchors_list = list(window_anchors.items())
-            for i, (_, alpha_i) in enumerate(anchors_list):
-                for _, alpha_j in anchors_list[i+1:]:
+            for i, (h8_i, alpha_i) in enumerate(anchors_list):
+                for h8_j, alpha_j in anchors_list[i+1:]:
                     pair_product = alpha_i * alpha_j
-                    if pair_product >= threshold:
+                    
+                    # Intent-Sovereignty: direct pairs bypass threshold
+                    is_direct_pair = (
+                        direct_anchors is not None
+                        and h8_i in direct_anchors
+                        and h8_j in direct_anchors
+                    )
+                    
+                    if is_direct_pair or pair_product >= threshold:
                         filtered_cross += 2 * pair_product
             
             window_energy = sum_sq + filtered_cross

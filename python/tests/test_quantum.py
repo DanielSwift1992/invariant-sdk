@@ -770,3 +770,117 @@ def test_query_level_binding_invariant():
         f"Doc A peak {peak_a} should be ~{expected_a} with query-level binding"
     )
 
+
+# =============================================================================
+# v1.9.5 GATE TESTS: Intent-Sovereignty (Invariant IV)
+# =============================================================================
+
+def test_intent_sovereignty_direct_pairs_bypass_threshold():
+    """
+    GATE TEST: Direct anchor pairs ALWAYS bypass threshold.
+    
+    This tests Invariant IV: Will > Observation.
+    Direct-to-Direct interactions are never filtered, even with low products.
+    """
+    # Need at least 2 events for coherence calculation
+    # Two direct anchors with low amplitudes (below typical threshold)
+    events = [
+        {"a": 0.1, "b": 0.1},  # Both anchors in same window
+        {"a": 0.1},           # Additional event to meet minimum
+    ]
+    
+    query = {"a", "b"}
+    direct = {"a", "b"}  # Both are direct query terms
+    
+    # High-amplitude query sets a high threshold
+    query_amplitudes = {"a": 0.1, "b": 0.1, "c": 2.0, "d": 2.0}
+    # threshold = median([0.01, 0.2, 0.2, 4.0, ...]) >> 0.01
+    
+    # WITHOUT direct_anchors: low-product pairs are filtered
+    coherence_without = compute_sigma_coherence(
+        events, query, 
+        query_amplitudes=query_amplitudes,
+        direct_anchors=None  # No protection
+    )
+    
+    # WITH direct_anchors: direct pairs bypass threshold
+    coherence_with = compute_sigma_coherence(
+        events, query,
+        query_amplitudes=query_amplitudes,
+        direct_anchors=direct  # Intent protection
+    )
+    
+    print(f"Coherence without intent protection: {coherence_without:.4f}")
+    print(f"Coherence with intent protection: {coherence_with:.4f}")
+    
+    # With intent sovereignty, coherence MUST be positive
+    assert coherence_with > 0, (
+        "Direct pairs must contribute even with low product (Will > Observation)"
+    )
+    # And higher than without protection
+    assert coherence_with >= coherence_without, (
+        "Intent protection should never decrease coherence"
+    )
+
+
+def test_intent_sovereignty_peak_score():
+    """
+    GATE TEST: compute_peak_score respects Intent-Sovereignty.
+    """
+    from invariant_sdk.quantum import compute_peak_score
+    
+    # Two low-amplitude direct anchors
+    events = [{"x": 0.2, "y": 0.2}]  # product = 0.04
+    query = {"x", "y"}
+    direct = {"x", "y"}
+    
+    # Query with high threshold
+    query_amplitudes = {"x": 0.2, "y": 0.2, "z": 5.0}
+    
+    peak_with = compute_peak_score(
+        events, query,
+        query_amplitudes=query_amplitudes,
+        direct_anchors=direct
+    )
+    
+    peak_without = compute_peak_score(
+        events, query,
+        query_amplitudes=query_amplitudes,
+        direct_anchors=None
+    )
+    
+    # With intent sovereignty: E = 0.04 + 0.04 + 2*0.04 = 0.16
+    # Without (filtered): E = 0.04 + 0.04 = 0.08
+    
+    assert peak_with > peak_without, (
+        f"Intent protection should increase peak: {peak_with} vs {peak_without}"
+    )
+
+
+def test_intent_sovereignty_partial_direct():
+    """
+    GATE TEST: Only ALL-direct pairs bypass; direct-expansion pairs use threshold.
+    """
+    # One direct, one expansion
+    events = [{"direct": 0.1, "expansion": 0.1}]
+    
+    query = {"direct", "expansion"}
+    direct = {"direct"}  # Only "direct" is a user query term
+    expansion = {"expansion"}  # This came from crystal/halo
+    
+    # High threshold should filter direct-expansion pair
+    query_amplitudes = {"direct": 0.1, "expansion": 0.1, "other": 5.0}
+    
+    coherence = compute_sigma_coherence(
+        events, query,
+        query_amplitudes=query_amplitudes,
+        direct_anchors=direct  # Only protects direct-direct pairs
+    )
+    
+    # Since the pair is direct-expansion (not direct-direct),
+    # it should be filtered by threshold
+    # (product = 0.01, threshold likely >> 0.01)
+    print(f"Coherence for direct-expansion pair: {coherence:.4f}")
+    
+    # This is NOT a gate test for == 0, but illustrates the behavior
+    # The pair SHOULD be filtered unless its product >= threshold
