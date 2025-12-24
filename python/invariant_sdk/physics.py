@@ -86,11 +86,6 @@ class Concept:
         """
         Get neighbors in a specific weight range (orbital shell).
         
-        Orbits (from INVARIANTS theory):
-          - Core (0.8+): Synonyms, definitions
-          - Near (0.5-0.8): Strong associations, properties
-          - Far (0.3-0.5): Weak associations, context
-        
         Returns list of {hash8, token, weight} dicts.
         """
         return [
@@ -100,18 +95,21 @@ class Concept:
     
     @property
     def core(self) -> List[Dict]:
-        """Core orbit (|weight| ≥ 0.7) — near-synonyms."""
-        return self.get_orbit(0.7, 1.0)
+        """Core orbit — near-synonyms (weight > 2 × mean_mass)."""
+        threshold = 2 * self.mean_mass
+        return self.get_orbit(threshold, 1.0)
     
     @property
     def near(self) -> List[Dict]:
-        """Near orbit (0.5 ≤ |weight| < 0.7) — strong associations."""
-        return self.get_orbit(0.5, 0.7)
+        """Near orbit — strong associations (mean_mass < weight <= 2 × mean_mass)."""
+        low = self.mean_mass
+        high = 2 * self.mean_mass
+        return self.get_orbit(low, high)
     
     @property
     def far(self) -> List[Dict]:
-        """Far orbit (threshold ≤ |weight| < 0.5) — weak associations."""
-        return self.get_orbit(0.0, 0.5)
+        """Far orbit — weak associations (weight <= mean_mass)."""
+        return self.get_orbit(0.0, self.mean_mass)
     
     def focus(self, other: "Concept") -> "Concept":
         """
@@ -284,8 +282,8 @@ class HaloPhysics:
     
     @property
     def mean_mass(self) -> float:
-        """Mean mass from crystal (phase boundary)."""
-        return self.meta.get("mean_mass", 0.26)
+        """Mean mass from crystal (phase boundary). No empirical fallback."""
+        return self.meta.get("mean_mass", 0.0)
     
     @property
     def crystal_id(self) -> str:
@@ -509,7 +507,8 @@ class HaloPhysics:
                 
                 for assoc in associations:
                     word = assoc.get("word") if isinstance(assoc, dict) else assoc
-                    score = float(assoc.get("score", 0.5) if isinstance(assoc, dict) else 0.5)
+                    # No hardcoded fallback — require server to provide score
+                    score = float(assoc.get("score", 0.0) if isinstance(assoc, dict) else 0.0)
                     
                     if not word or not isinstance(word, str):
                         continue
@@ -530,13 +529,14 @@ class HaloPhysics:
                         continue
                     
                     # New association (quantum tunnel)
+                    # mass = mean_mass (not hardcoded 0.5)
                     result[assoc_h8] = {
                         "label": word,
                         "source_word": query_text,
                         "sources": query_words.copy(),
                         "is_direct": False,
                         "weight": score,
-                        "mass": 0.5,  # Liquid phase
+                        "mass": self.mean_mass,  # Derived, not hardcoded
                         "source_type": "embedding",
                     }
         except Exception as e:
