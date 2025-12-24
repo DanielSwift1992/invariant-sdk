@@ -456,10 +456,12 @@ def beta_from_query(amplitudes: Dict[str, float]) -> float:
     """
     Invariant IX'.3: Derive β from query concentration.
     
-    β = max(α) / (Σα + ε)
+    β = max(α) / (Σα + ε) × N
     
     Needle query (one dominant anchor) → β ≈ 1 → max mode
-    Thematic query (equal anchors) → β ≈ 0.25 → sum mode
+    Thematic query (equal anchors) → β ≈ 1/N → sum mode
+    
+    NOTE: No arbitrary clamp. Pure derived value.
     """
     if not amplitudes:
         return 1.0
@@ -471,13 +473,11 @@ def beta_from_query(amplitudes: Dict[str, float]) -> float:
     max_alpha = max(values)
     sum_alpha = sum(values)
     
-    # Scale β to be useful: raw ratio is often close to 1/N
-    # Multiply by N to get meaningful spread
+    # β = concentration × N (pure derivation)
     n = len(values)
     ratio = max_alpha / (sum_alpha + 1e-9)
     
-    # β ∈ [0.1, 10] — enough range for log-sum-exp behavior
-    return min(10.0, max(0.1, ratio * n))
+    return ratio * n
 
 
 def binding_threshold(amplitudes: Dict[str, float]) -> float:
